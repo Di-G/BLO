@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<meta name="theme-color" content="#0f172a" />
+	<title>BLO Forms Tracker</title>
+	<link rel="manifest" href="manifest.webmanifest" />
+	<link rel="apple-touch-icon" sizes="192x192" href="icons/icon-192.png" />
+	<link rel="apple-touch-icon" sizes="512x512" href="icons/icon-512.png" />
+		<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+	<header class="app-header">
+		<h1>BLO Forms Tracker</h1>
+		<div class="header-actions">
+			<button id="settingsBtn" class="secondary" title="Open settings">Settings</button>
+			<button id="themeToggle" class="secondary" title="Toggle day/night mode">Night Mode</button>
+		</div>
+	</header>
+
+	<main class="container">
+		<section class="controls">
+			<div id="firstRunControls" class="first-run-controls">
+				<label for="numForms">Number of forms (1–10,000):</label>
+				<div class="first-run-inputs">
+					<input id="numForms" type="number" min="1" max="10000" placeholder="e.g., 1300" inputmode="numeric" pattern="[0-9]*" />
+					<button id="generateBtn">Generate</button>
+				</div>
+				<p class="first-run-note">After the first setup you can change this from Settings.</p>
+			</div>
+		</section>
+
+		<section id="warning" class="warning" role="alert" aria-live="polite"></section>
+
+		<section id="listHeader" class="list-header hidden">
+			<div class="col-num"></div>
+			<div id="hdrStatus1" class="col-status"></div>
+			<div id="hdrStatus2" class="col-status"></div>
+		</section>
+
+		<section id="list" class="list" aria-live="polite"></section>
+	</main>
+
+	<!-- Settings Modal -->
+	<div id="settingsModal" class="modal" aria-hidden="true" role="dialog" aria-modal="true">
+		<div class="modal-backdrop" data-close="true"></div>
+		<div class="modal-content" role="document">
+			<div class="modal-header">
+				<h3>Settings</h3>
+				<button id="settingsClose" class="secondary" title="Close settings">Close</button>
+			</div>
+			<div class="modal-body">
+				<section class="settings-section" id="formsSettings">
+					<h4>Forms</h4>
+					<div class="settings-form">
+						<label for="settingsNumForms">Number of forms (1–10,000)</label>
+						<div class="settings-form-controls">
+							<input id="settingsNumForms" type="number" min="1" max="10000" placeholder="e.g., 1300" inputmode="numeric" pattern="[0-9]*" />
+							<div class="settings-form-actions">
+								<button id="settingsSaveForms" type="button">Save</button>
+								<button id="clearAllBtn" type="button" class="danger">Clear All Data</button>
+							</div>
+						</div>
+						<p id="settingsFormsWarning" class="settings-message" role="alert" aria-live="polite"></p>
+					</div>
+				</section>
+				<section class="society-manager">
+					<h4>Societies</h4>
+					<div class="society-form">
+						<input id="societyName" type="text" placeholder="Society name" autocomplete="off" />
+						<input id="societyStart" type="number" min="1" max="10000" placeholder="Start #" inputmode="numeric" pattern="[0-9]*" />
+						<span class="range-sep">to</span>
+						<input id="societyEnd" type="number" min="1" max="10000" placeholder="End #" inputmode="numeric" pattern="[0-9]*" />
+						<button id="addSocietyBtn" type="button">Add</button>
+					</div>
+					<div id="societyError" class="society-error" role="alert" aria-live="polite"></div>
+					<ul id="societyList" class="society-list"></ul>
+				</section>
+				<section class="settings-section" id="dataTransfer">
+					<h4>Import &amp; Export</h4>
+					<div class="import-export">
+						<div class="export-block">
+							<button id="exportToggle" type="button">Export Data</button>
+							<div id="exportOptions" class="export-options hidden" role="menu" aria-label="Export options">
+								<button id="exportPdfBtn" type="button">Export as PDF</button>
+								<div id="exportPdfPanel" class="export-pdf-panel hidden" role="group" aria-live="polite">
+									<p class="export-pdf-heading">Choose what to include:</p>
+									<label class="export-choice">
+										<input id="exportPdfModeAll" type="radio" name="exportPdfMode" value="all" checked />
+										<span>Export all forms</span>
+									</label>
+									<label class="export-choice">
+										<input id="exportPdfModeSociety" type="radio" name="exportPdfMode" value="societies" />
+										<span>Export by societies</span>
+									</label>
+									<div id="exportPdfSocietyWrap" class="export-pdf-sub hidden">
+										<label for="exportPdfSocieties">Select societies</label>
+										<select id="exportPdfSocieties" multiple size="6"></select>
+										<p class="export-hint">Pick one or more societies.</p>
+									</div>
+									<label class="export-choice">
+										<input id="exportPdfModeRange" type="radio" name="exportPdfMode" value="range" />
+										<span>Export by form numbers</span>
+									</label>
+									<div id="exportPdfRangeWrap" class="export-pdf-sub hidden">
+										<div class="range-inputs">
+											<label for="exportPdfFrom">From
+												<input id="exportPdfFrom" type="number" min="1" max="10000" inputmode="numeric" pattern="[0-9]*" />
+											</label>
+											<label for="exportPdfTo">To
+												<input id="exportPdfTo" type="number" min="1" max="10000" inputmode="numeric" pattern="[0-9]*" />
+											</label>
+										</div>
+										<p class="export-hint">Only forms within this range will be included.</p>
+									</div>
+									<div class="export-pdf-actions">
+										<button id="exportPdfConfirm" type="button">Generate PDF</button>
+										<button id="exportPdfCancel" type="button" class="secondary">Cancel</button>
+									</div>
+								</div>
+								<button id="exportExcelBtn" type="button">Export as Excel</button>
+							</div>
+						</div>
+						<div class="import-block">
+							<button id="importExcelBtn" type="button">Import Excel</button>
+							<input id="importExcelInput" type="file" accept=".xlsx,.xls" hidden />
+							<p class="import-hint">Only Excel files exported from this app are supported.</p>
+						</div>
+					</div>
+					<p id="importExportMessage" class="settings-message" role="alert" aria-live="polite"></p>
+				</section>
+			</div>
+		</div>
+	</div>
+
+	<!-- Confirmation Dialog -->
+	<div id="confirmModal" class="confirm-modal" aria-hidden="true" role="dialog" aria-modal="true">
+		<div class="confirm-surface" role="document">
+			<div class="confirm-header">
+				<h3>Confirm Action</h3>
+			</div>
+			<div class="confirm-body">
+				<p id="confirmMessage"></p>
+			</div>
+			<div class="confirm-actions">
+				<button id="confirmCancel" class="secondary">Cancel</button>
+				<button id="confirmOk" class="confirm-ok">Continue</button>
+			</div>
+		</div>
+	</div>
+
+	<footer class="app-footer">
+		<small>Made for Booth Level Officers to track distributed and collected forms.</small>
+		<button id="installBtn" class="install-banner hidden" title="Install app">
+			<span class="install-banner__title">Install BLO Forms Tracker</span>
+			<span class="install-banner__hint">Get offline access and quick launch from your home screen.</span>
+		</button>
+	</footer>
+
+	<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+	<script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.0/dist/jspdf.plugin.autotable.min.js"></script>
+	<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+	<script src="script.js?v=7"></script>
+	<noscript>Your browser must have JavaScript enabled to use this app.</noscript>
+</body>
+</html>
+
+
