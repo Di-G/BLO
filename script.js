@@ -979,7 +979,7 @@
 
 	function buildRowSummary(row) {
 		const summary = {
-			title: "No action recorded",
+			title: "-",
 			details: []
 		};
 		const hasComments = typeof row.comments === "string" && row.comments.trim().length > 0;
@@ -987,32 +987,20 @@
 
 		if (row.haveForm) {
 			summary.title = "I have form";
-			if (row.status1) {
-				summary.details.push(`Status 1: ${row.status1}`);
-			}
-			if (row.status2) {
-				summary.details.push(`Status 2: ${row.status2}`);
-			}
-			if (hasComments) {
-				summary.details.push(`Comments: ${trimmedComment}`);
-			}
+			const statuses = [row.status1, row.status2].map((s) => (typeof s === "string" ? s.trim() : "")).filter(Boolean);
+			if (statuses.length) summary.details.push(statuses.join(", "));
+			if (hasComments) summary.details.push(trimmedComment);
 		} else if (row.distributed && row.takenBack) {
-			summary.title = "Completed (Distributed & Collected)";
-			if (hasComments) {
-				summary.details.push(`Comments: ${trimmedComment}`);
-			}
+			summary.title = "Completed";
+			if (hasComments) summary.details.push(trimmedComment);
 		} else if (row.distributed) {
 			summary.title = "Distributed";
-			if (hasComments) {
-				summary.details.push(`Comments: ${trimmedComment}`);
-			}
+			if (hasComments) summary.details.push(trimmedComment);
 		} else if (row.takenBack) {
 			summary.title = "Taken back form";
-			if (hasComments) {
-				summary.details.push(`Comments: ${trimmedComment}`);
-			}
+			if (hasComments) summary.details.push(trimmedComment);
 		} else if (hasComments) {
-			summary.details.push(`Comments: ${trimmedComment}`);
+			summary.details.push(trimmedComment);
 		}
 
 		return summary;
@@ -1164,6 +1152,12 @@
 		const { jsPDF } = window.jspdf;
 		const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
 		const marginLeft = 40;
+		const marginRight = 40;
+		const pageWidth = doc.internal.pageSize.getWidth();
+		const tableWidth = pageWidth - marginLeft - marginRight;
+		const colWidthNum = 60;
+		const colWidthStatus = 240;
+		const colWidthDetails = Math.max(140, tableWidth - colWidthNum - colWidthStatus);
 		const titleY = 50;
 		doc.setFontSize(18);
 		doc.text("BLO Forms Report", marginLeft, titleY);
@@ -1220,6 +1214,7 @@
 				startY: currentY,
 				head: [["Form #", "Status", "Details"]],
 				body,
+				margin: { left: marginLeft, right: marginRight },
 				styles: {
 					fontSize: 10,
 					cellPadding: 6,
@@ -1228,9 +1223,9 @@
 				},
 				headStyles: { fillColor: [34, 150, 243], textColor: 255, fontStyle: "bold" },
 				columnStyles: {
-					0: { halign: "center", cellWidth: 60 },
-					1: { cellWidth: 320 },
-					2: { cellWidth: "auto" }
+					0: { halign: "center", cellWidth: colWidthNum },
+					1: { cellWidth: colWidthStatus },
+					2: { cellWidth: colWidthDetails }
 				},
 				didParseCell: (data) => {
 					if (data.section !== "body") return;
@@ -1624,7 +1619,21 @@
 	}
 
 	if ("serviceWorker" in navigator) {
-		window.addEventListener("load", () => {
+		window.addEventListener("load", async () => {
+			const isLocalhost = ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
+			if (isLocalhost) {
+				try {
+					const regs = await navigator.serviceWorker.getRegistrations();
+					await Promise.all(regs.map((r) => r.unregister()));
+					if (window.caches && typeof caches.keys === "function") {
+						const keys = await caches.keys();
+						await Promise.all(keys.map((k) => caches.delete(k)));
+					}
+				} catch (error) {
+					console.error("Local SW cleanup failed:", error);
+				}
+				return;
+			}
 			navigator.serviceWorker.register("sw.js").catch((error) => {
 				console.error("Service worker registration failed:", error);
 			});

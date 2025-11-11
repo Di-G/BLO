@@ -648,6 +648,14 @@ button[disabled] { opacity: 0.6; cursor: not-allowed; }
 	.modal-body {
 		max-height: calc(100vh - 64px);
 	}
+	/* Ensure 2x2 layout for action buttons on mobile */
+	.actions {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+	}
+	.actions > button {
+		width: 100%;
+	}
 }
 
 /* Light theme tweaks */
