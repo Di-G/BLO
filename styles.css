@@ -112,6 +112,16 @@ body.has-install-banner .app-footer {
 	padding-bottom: 80px;
 }
 
+/* Ensure install banner isn't covered by mobile browser toolbars in small viewports */
+@media (max-width: 900px) {
+	.install-banner {
+		bottom: calc(72px + env(safe-area-inset-bottom));
+	}
+	body.has-install-banner {
+		padding-bottom: 200px;
+	}
+}
+
 /* Modal */
 .modal {
 	position: fixed;

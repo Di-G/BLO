@@ -1050,12 +1050,25 @@
 			details.appendChild(summary);
 			const body = document.createElement("div");
 			body.className = "society-body";
-			for (const num of numbers) {
-				body.appendChild(buildRow(num));
+			const renderRowsIntoBody = () => {
+				// Avoid re-rendering if already populated
+				if (body.childElementCount > 0) return;
+				const rowsFragment = document.createDocumentFragment();
+				for (const num of numbers) {
+					rowsFragment.appendChild(buildRow(num));
+				}
+				body.appendChild(rowsFragment);
+			};
+			// Lazy render: only populate when opened
+			if (details.open) {
+				renderRowsIntoBody();
 			}
 			details.appendChild(body);
 			details.addEventListener("toggle", () => {
 				setGroupOpenState(groupId, details.open);
+				if (details.open) {
+					renderRowsIntoBody();
+				}
 				recalcHeaderStatusVisibility();
 			});
 			fragment.appendChild(details);
@@ -1430,8 +1443,11 @@
 		}
 		document.documentElement.setAttribute("data-theme", resolved === "light" ? "light" : "dark");
 		if (els.themeToggle) {
-			els.themeToggle.textContent = resolved === "light" ? "Night Mode" : "Day Mode";
-			els.themeToggle.title = resolved === "light" ? "Switch to Night Mode" : "Switch to Day Mode";
+			// Use emoji icon to indicate the action (moon shown in light theme, sun shown in dark theme)
+			els.themeToggle.textContent = resolved === "light" ? "🌙" : "☀️";
+			const label = resolved === "light" ? "Switch to Night Mode" : "Switch to Day Mode";
+			els.themeToggle.title = label;
+			els.themeToggle.setAttribute("aria-label", label);
 		}
 	}
 
@@ -1487,7 +1503,10 @@
 	}
 	if (els.installBtn) {
 		els.installBtn.addEventListener("click", async () => {
-			if (!deferredInstallPrompt) return;
+			if (!deferredInstallPrompt) {
+				showWarning("To install: Use your browser menu to Install/Add to Home Screen.");
+				return;
+			}
 			toggleInstallButton(false);
 			deferredInstallPrompt.prompt();
 			try {
@@ -1614,13 +1633,24 @@
 	const isAlreadyInstalled =
 		(window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) ||
 		(typeof window.navigator.standalone === "boolean" && window.navigator.standalone);
-	if (isAlreadyInstalled) {
-		toggleInstallButton(false);
+	// Always show in localhost/dev, even if emulation reports standalone
+	const isLocalhost = ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
+	if (isLocalhost) {
+		toggleInstallButton(true);
+	} else {
+		if (isAlreadyInstalled) {
+			toggleInstallButton(false);
+		} else {
+			// Show the install banner proactively; if the prompt becomes available later,
+			// clicking will trigger it, otherwise we show user instructions.
+			toggleInstallButton(true);
+		}
 	}
 
 	if ("serviceWorker" in navigator) {
 		window.addEventListener("load", async () => {
 			const isLocalhost = ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
+			// In development: clean old SW/caches, then still register to allow install prompt on localhost
 			if (isLocalhost) {
 				try {
 					const regs = await navigator.serviceWorker.getRegistrations();
@@ -1632,7 +1662,6 @@
 				} catch (error) {
 					console.error("Local SW cleanup failed:", error);
 				}
-				return;
 			}
 			navigator.serviceWorker.register("sw.js").catch((error) => {
 				console.error("Service worker registration failed:", error);
