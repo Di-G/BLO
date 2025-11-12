@@ -596,6 +596,7 @@
 			distributed: false,
 			takenBack: false,
 			haveForm: false,
+			distributionType: "self",
 			showSecondStatus: false,
 			status1: "",
 			status2: "",
@@ -607,6 +608,15 @@
 		state.takenBack = coerceBoolean(raw.takenBack);
 		state.haveForm = coerceBoolean(raw.haveForm);
 		state.showSecondStatus = coerceBoolean(raw.showSecondStatus);
+		const normalizedDistributionType = coerceString(raw.distributionType)
+			.trim()
+			.toLowerCase()
+			.replace(/[\s_-]+/g, " ");
+		if (normalizedDistributionType === "given to" || normalizedDistributionType === "given") {
+			state.distributionType = "given";
+		} else if (normalizedDistributionType === "self taken" || normalizedDistributionType === "self") {
+			state.distributionType = "self";
+		}
 		state.status1 = coerceString(raw.status1).trim();
 		state.status2 = coerceString(raw.status2).trim();
 		state.comments = coerceString(raw.comments);
@@ -615,6 +625,9 @@
 			state.showSecondStatus = true;
 		}
 		if (state.comments.trim() && !state.showComments) {
+			state.showComments = true;
+		}
+		if (state.distributionType === "given") {
 			state.showComments = true;
 		}
 		return state;
@@ -814,6 +827,38 @@
 		actionsWrap.appendChild(btnHave);
 		actionsWrap.appendChild(btnBack);
 		actionsWrap.appendChild(btnComment);
+		const distributedMeta = document.createElement("div");
+		distributedMeta.className = "distributed-meta";
+		const distributedLabel = document.createElement("span");
+		distributedLabel.className = "distributed-label";
+		distributedLabel.textContent = "Distributed:";
+		const distributedSelect = document.createElement("select");
+		distributedSelect.className = "distributed-select";
+		distributedSelect.setAttribute("aria-label", "Distributed assignment");
+		const distSelf = document.createElement("option");
+		distSelf.value = "self";
+		distSelf.textContent = "Self Taken";
+		const distGiven = document.createElement("option");
+		distGiven.value = "given";
+		distGiven.textContent = "Given to";
+		distributedSelect.appendChild(distSelf);
+		distributedSelect.appendChild(distGiven);
+		const normalizedDistributionType = saved.distributionType === "given" ? "given" : "self";
+		saved.distributionType = normalizedDistributionType;
+		distributedSelect.value = normalizedDistributionType;
+		distributedMeta.appendChild(distributedLabel);
+		distributedMeta.appendChild(distributedSelect);
+		actionsWrap.appendChild(distributedMeta);
+		const syncDistributedMetaVisibility = () => {
+			if (!saved.distributed) {
+				distributedMeta.style.display = "none";
+				distributedSelect.value = "self";
+				return;
+			}
+			distributedMeta.style.display = "";
+			distributedSelect.value = saved.distributionType === "given" ? "given" : "self";
+		};
+		syncDistributedMetaVisibility();
 		actionsCol.appendChild(actionsWrap);
 
 		// Status selects
@@ -849,6 +894,17 @@
 		textarea.placeholder = "Comments (optional)";
 		textarea.value = saved.comments || "";
 		commentsCol.appendChild(textarea);
+		const focusCommentInput = () => {
+			textarea.focus();
+			const length = textarea.value.length;
+			if (typeof textarea.setSelectionRange === "function") {
+				try {
+					textarea.setSelectionRange(length, length);
+				} catch {
+					// Ignore if the browser does not support setSelectionRange on textarea
+				}
+			}
+		};
 		// Hide comments by default unless there is saved text or explicit toggle
 		const shouldShowComments = Boolean(saved.comments && saved.comments.trim().length > 0) || Boolean(saved.showComments);
 		commentsCol.style.display = shouldShowComments ? "" : "none";
@@ -863,12 +919,14 @@
 				saved.haveForm = false;
 				saved.distributed = true;
 				saved.takenBack = false;
+				saved.distributionType = "self";
 				btnHave.className = "btn-muted";
 				btnBack.className = "btn-muted";
 				status1Col.style.display = "none";
 				status2Col.style.display = "none";
 				addSecondBtn.style.display = "none";
 				btnDist.className = "btn-dist";
+				syncDistributedMetaVisibility();
 				refreshRowVisuals();
 				saveRowState(id, saved);
 				recalcHeaderStatusVisibility();
@@ -881,7 +939,9 @@
 			}
 			const next = !saved.distributed;
 			saved.distributed = next;
+			saved.distributionType = "self";
 			btnDist.className = next ? "btn-dist" : "btn-muted";
+			syncDistributedMetaVisibility();
 			refreshRowVisuals();
 			saveRowState(id, saved);
 		});
@@ -912,6 +972,7 @@
 			if (next) {
 				saved.distributed = false;
 				saved.takenBack = false;
+				saved.distributionType = "self";
 				btnDist.className = "btn-muted";
 				btnBack.className = "btn-muted";
 				refreshRowVisuals();
@@ -927,6 +988,7 @@
 				btnBack.className = saved.takenBack ? "btn-back" : "btn-muted";
 				refreshRowVisuals();
 			}
+			syncDistributedMetaVisibility();
 			saveRowState(id, saved);
 			recalcHeaderStatusVisibility();
 		});
@@ -945,6 +1007,24 @@
 			saveRowState(id, saved);
 		});
 
+		distributedSelect.addEventListener("change", () => {
+			const nextValue = distributedSelect.value === "given" ? "given" : "self";
+			saved.distributionType = nextValue;
+			let shouldFocusComment = false;
+			if (nextValue === "given") {
+				if (commentsCol.style.display === "none") {
+					commentsCol.style.display = "";
+				}
+				btnComment.textContent = "Hide comment";
+				saved.showComments = true;
+				shouldFocusComment = true;
+			}
+			saveRowState(id, saved);
+			if (shouldFocusComment) {
+				requestAnimationFrame(focusCommentInput);
+			}
+		});
+
 		btnComment.addEventListener("click", () => {
 			const visible = commentsCol.style.display !== "none";
 			const nextVisible = !visible;
@@ -953,7 +1033,7 @@
 			saved.showComments = nextVisible;
 			saveRowState(id, saved);
 			if (nextVisible) {
-				textarea.focus();
+				focusCommentInput();
 			}
 		});
 
@@ -1003,9 +1083,11 @@
 			if (hasComments) summary.details.push(trimmedComment);
 		} else if (row.distributed && row.takenBack) {
 			summary.title = "Completed";
+			if (row.distributionType === "given") summary.details.push("Given to");
 			if (hasComments) summary.details.push(trimmedComment);
 		} else if (row.distributed) {
 			summary.title = "Distributed";
+			if (row.distributionType === "given") summary.details.push("Given to");
 			if (hasComments) summary.details.push(trimmedComment);
 		} else if (row.takenBack) {
 			summary.title = "Taken back form";
@@ -1295,7 +1377,7 @@
 		}
 		const workbook = XLSX.utils.book_new();
 		const formsSheetData = [
-			["FormNumber", "GroupName", "Distributed", "TakenBack", "HaveForm", "Status1", "Status2", "Comments", "ShowSecondStatus", "ShowComments"]
+			["FormNumber", "GroupName", "Distributed", "TakenBack", "HaveForm", "DistributionType", "Status1", "Status2", "Comments", "ShowSecondStatus", "ShowComments"]
 		];
 		for (const row of snapshot.rows) {
 			formsSheetData.push([
@@ -1304,6 +1386,7 @@
 				row.distributed ? "Yes" : "No",
 				row.takenBack ? "Yes" : "No",
 				row.haveForm ? "Yes" : "No",
+				row.distributionType === "given" ? "Given to" : "Self Taken",
 				row.status1,
 				row.status2,
 				row.comments,
@@ -1384,6 +1467,7 @@
 					distributed: row.Distributed,
 					takenBack: row.TakenBack,
 					haveForm: row.HaveForm,
+					distributionType: row.DistributionType,
 					showSecondStatus: row.ShowSecondStatus,
 					status1: row.Status1,
 					status2: row.Status2,

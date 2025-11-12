@@ -597,6 +597,22 @@ button:focus, input:focus, select:focus, textarea:focus {
 	flex-wrap: wrap;
 }
 
+.distributed-meta {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex: 1 1 100%;
+}
+
+.distributed-label {
+	font-size: 13px;
+	color: var(--muted);
+}
+
+.distributed-select {
+	min-width: 160px;
+}
+
 .btn-dist { background: var(--accent-2); color: #0b1324; }
 .btn-back { background: var(--warn); color: #3b2002; }
 .btn-have { background: #a78bfa; color: #1e1b4b; }
@@ -664,6 +680,12 @@ button[disabled] { opacity: 0.6; cursor: not-allowed; }
 		grid-template-columns: 1fr 1fr;
 	}
 	.actions > button {
+		width: 100%;
+	}
+	.actions .distributed-meta {
+		grid-column: 1 / -1;
+	}
+	.distributed-select {
 		width: 100%;
 	}
 }
