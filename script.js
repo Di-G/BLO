@@ -1633,36 +1633,15 @@
 	const isAlreadyInstalled =
 		(window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) ||
 		(typeof window.navigator.standalone === "boolean" && window.navigator.standalone);
-	// Always show in localhost/dev, even if emulation reports standalone
-	const isLocalhost = ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
-	if (isLocalhost) {
-		toggleInstallButton(true);
+	// Default: keep banner hidden; it will be shown when beforeinstallprompt fires
+	if (isAlreadyInstalled) {
+		toggleInstallButton(false);
 	} else {
-		if (isAlreadyInstalled) {
-			toggleInstallButton(false);
-		} else {
-			// Show the install banner proactively; if the prompt becomes available later,
-			// clicking will trigger it, otherwise we show user instructions.
-			toggleInstallButton(true);
-		}
+		toggleInstallButton(false);
 	}
 
 	if ("serviceWorker" in navigator) {
 		window.addEventListener("load", async () => {
-			const isLocalhost = ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
-			// In development: clean old SW/caches, then still register to allow install prompt on localhost
-			if (isLocalhost) {
-				try {
-					const regs = await navigator.serviceWorker.getRegistrations();
-					await Promise.all(regs.map((r) => r.unregister()));
-					if (window.caches && typeof caches.keys === "function") {
-						const keys = await caches.keys();
-						await Promise.all(keys.map((k) => caches.delete(k)));
-					}
-				} catch (error) {
-					console.error("Local SW cleanup failed:", error);
-				}
-			}
 			navigator.serviceWorker.register("sw.js").catch((error) => {
 				console.error("Service worker registration failed:", error);
 			});
