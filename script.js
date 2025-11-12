@@ -63,10 +63,20 @@
 	const storageCountKey = "blo_forms_tracker_v1_count";
 	const storageThemeKey = "blo_forms_tracker_v1_theme";
 	const storageGroupsKey = "blo_forms_tracker_v1_groups";
+	const storageInstalledKey = "blo_forms_tracker_v1_installed";
 	const storageGroupOpenKey = (id) => `blo_forms_tracker_v1_group_open_${id}`;
 
 	let deferredInstallPrompt = null;
 	let installMessageTimeout = null;
+
+	function isAppMarkedInstalled() {
+		return localStorage.getItem(storageInstalledKey) === "1";
+	}
+
+	function markAppInstalled() {
+		localStorage.setItem(storageInstalledKey, "1");
+		toggleInstallButton(false);
+	}
 
 	function toggleInstallButton(show) {
 		if (!els.installBtn) return;
@@ -89,6 +99,7 @@
 			showWarning("");
 			installMessageTimeout = null;
 		}, 5000);
+		markAppInstalled();
 	}
 
 	function coerceBoolean(value) {
@@ -1513,6 +1524,8 @@
 				const outcome = await deferredInstallPrompt.userChoice;
 				if (outcome && outcome.outcome === "accepted") {
 					announceInstallSuccess();
+				} else if (outcome && outcome.outcome === "dismissed") {
+					showWarning("Install cancelled. You can try again from the menu.");
 				}
 			} catch (error) {
 				console.error("Install prompt failed:", error);
@@ -1594,6 +1607,9 @@
 	}
 	window.addEventListener("beforeinstallprompt", (event) => {
 		event.preventDefault();
+		if (isAppMarkedInstalled()) {
+			return;
+		}
 		deferredInstallPrompt = event;
 		const isStandalone = window.matchMedia && window.matchMedia("(display-mode: standalone)").matches;
 		const isIosStandalone = typeof window.navigator.standalone === "boolean" && window.navigator.standalone;
@@ -1603,7 +1619,6 @@
 	});
 	window.addEventListener("appinstalled", () => {
 		deferredInstallPrompt = null;
-		toggleInstallButton(false);
 		announceInstallSuccess();
 	});
 	document.addEventListener("click", (event) => {
@@ -1633,10 +1648,9 @@
 	const isAlreadyInstalled =
 		(window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) ||
 		(typeof window.navigator.standalone === "boolean" && window.navigator.standalone);
-	// Default: keep banner hidden; it will be shown when beforeinstallprompt fires
 	if (isAlreadyInstalled) {
-		toggleInstallButton(false);
-	} else {
+		markAppInstalled();
+	} else if (isAppMarkedInstalled()) {
 		toggleInstallButton(false);
 	}
 
