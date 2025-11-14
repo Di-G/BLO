@@ -788,18 +788,28 @@
 			distributed: false,
 			takenBack: false,
 			haveForm: false,
+			missedForm: false,
 			distributionType: "self",
 			showSecondStatus: false,
 			status1: "",
 			status2: "",
 			comments: "",
-			showComments: false
+			showComments: false,
+			deleted: false,
+			missing: false
 		};
 		if (!raw || typeof raw !== "object") return state;
 		state.distributed = coerceBoolean(raw.distributed);
 		state.takenBack = coerceBoolean(raw.takenBack);
 		state.haveForm = coerceBoolean(raw.haveForm);
 		state.showSecondStatus = coerceBoolean(raw.showSecondStatus);
+		state.missedForm = coerceBoolean(
+			raw.missedForm ??
+				raw.didntReceiveBack ??
+				raw.didNotReceiveBack ??
+				raw.notReturned ??
+				raw.notReturnedForm
+		);
 		const normalizedDistributionType = coerceString(raw.distributionType)
 			.trim()
 			.toLowerCase()
@@ -813,11 +823,27 @@
 		state.status2 = coerceString(raw.status2).trim();
 		state.comments = coerceString(raw.comments);
 		state.showComments = coerceBoolean(raw.showComments);
+		state.deleted = coerceBoolean(raw.deleted ?? raw.isDeleted ?? raw.removed);
+		state.missing = coerceBoolean(raw.missing ?? raw.formMissing ?? raw.isMissing);
 		if (state.status2 && !state.showSecondStatus) {
 			state.showSecondStatus = true;
 		}
 		if (state.comments.trim() && !state.showComments) {
 			state.showComments = true;
+		}
+		if (state.missedForm) {
+			state.haveForm = false;
+			state.takenBack = false;
+		}
+		if (state.deleted || state.missing) {
+			state.distributed = false;
+			state.takenBack = false;
+			state.haveForm = false;
+			state.missedForm = false;
+			state.showSecondStatus = false;
+			state.status1 = "";
+			state.status2 = "";
+			state.showComments = false;
 		}
 		if (state.distributionType === "given") {
 			state.showComments = true;
@@ -862,6 +888,9 @@
 
 	function determineRowColorHex(state) {
 		if (!state || typeof state !== "object") return "#ffffff";
+		if (state.deleted) return "#e2e8f0"; // muted gray for deleted
+		if (state.missing) return "#fef3c7"; // pale amber for missing
+		if (state.missedForm) return "#fecaca"; // deeper red for not returned
 		if (state.haveForm) return "#f5d0fe"; // brighter purple
 		if (state.distributed && state.takenBack) return "#dcfce7"; // light green
 		if (state.distributed) return "#bae6fd"; // brighter blue
@@ -980,8 +1009,25 @@
 		const row = document.createElement("div");
 		row.className = "row";
 		function refreshRowVisuals() {
-			row.classList.remove("state-dist-yes", "state-back-yes", "state-have-yes", "state-dist-and-back");
-			if (saved.haveForm) {
+			row.classList.remove(
+				"state-dist-yes",
+				"state-back-yes",
+				"state-have-yes",
+				"state-dist-and-back",
+				"state-missed",
+				"state-ignored",
+				"state-deleted",
+				"state-missing"
+			);
+			if (saved.deleted || saved.missing) {
+				row.classList.add("state-ignored");
+				if (saved.deleted) row.classList.add("state-deleted");
+				if (saved.missing) row.classList.add("state-missing");
+				return;
+			}
+			if (saved.missedForm) {
+				row.classList.add("state-missed");
+			} else if (saved.haveForm) {
 				row.classList.add("state-have-yes");
 			} else if (saved.distributed && saved.takenBack) {
 				row.classList.add("state-dist-and-back");
@@ -1011,14 +1057,14 @@
 		btnHave.textContent = "I have form";
 		const btnBack = document.createElement("button");
 		btnBack.className = saved.takenBack ? "btn-back" : "btn-muted";
-		btnBack.textContent = "Taken back form";
-		const btnComment = document.createElement("button");
-		btnComment.className = "secondary";
-		btnComment.textContent = "Comment";
+		btnBack.textContent = "Collected form";
+		const btnMissed = document.createElement("button");
+		btnMissed.className = saved.missedForm ? "btn-missed" : "btn-muted";
+		btnMissed.innerHTML = "Didn't get<br>back form";
 		actionsWrap.appendChild(btnDist);
 		actionsWrap.appendChild(btnHave);
 		actionsWrap.appendChild(btnBack);
-		actionsWrap.appendChild(btnComment);
+		actionsWrap.appendChild(btnMissed);
 		const distributedMeta = document.createElement("div");
 		distributedMeta.className = "distributed-meta";
 		const distributedLabel = document.createElement("span");
@@ -1080,11 +1126,30 @@
 
 		// Comments
 		const commentsCol = document.createElement("div");
-		commentsCol.className = "col-comments";
+		commentsCol.className = "col-comments comment-inline";
+		const commentControls = document.createElement("div");
+		commentControls.className = "comment-inline-controls";
+		const commentToggle = document.createElement("button");
+		commentToggle.type = "button";
+		commentToggle.className = "comment-inline-toggle";
+		commentToggle.setAttribute("aria-expanded", "false");
+		commentControls.appendChild(commentToggle);
+		const btnDeleted = document.createElement("button");
+		btnDeleted.type = "button";
+		btnDeleted.className = "comment-flag comment-flag-deleted";
+		btnDeleted.textContent = "DELETED";
+		commentControls.appendChild(btnDeleted);
+		const btnMissing = document.createElement("button");
+		btnMissing.type = "button";
+		btnMissing.className = "comment-flag comment-flag-missing";
+		btnMissing.textContent = "FORM MISSING";
+		commentControls.appendChild(btnMissing);
+		commentsCol.appendChild(commentControls);
 		const textarea = document.createElement("textarea");
 		textarea.className = "comments";
 		textarea.placeholder = "Comments (optional)";
 		textarea.value = saved.comments || "";
+		textarea.setAttribute("aria-label", "Comment");
 		commentsCol.appendChild(textarea);
 		const focusCommentInput = () => {
 			textarea.focus();
@@ -1097,10 +1162,127 @@
 				}
 			}
 		};
-		// Hide comments by default unless there is saved text or explicit toggle
-		const shouldShowComments = Boolean(saved.comments && saved.comments.trim().length > 0) || Boolean(saved.showComments);
-		commentsCol.style.display = shouldShowComments ? "" : "none";
-		btnComment.textContent = shouldShowComments ? "Hide comment" : "Comment";
+		const refreshCommentToggleLabel = () => {
+			commentToggle.textContent = "Comment";
+		};
+		const updateCommentVisibility = (visible, { persist = true, focus = false } = {}) => {
+			saved.showComments = visible;
+			commentsCol.classList.toggle("comment-inline--collapsed", !visible);
+			commentToggle.setAttribute("aria-pressed", visible ? "true" : "false");
+			refreshCommentToggleLabel();
+			if (visible && focus) {
+				requestAnimationFrame(focusCommentInput);
+			}
+			if (persist) {
+				saveRowState(id, saved);
+			}
+		};
+		const highlightComment = ({ focus = false } = {}) => {
+			updateCommentVisibility(true, { persist: false, focus });
+			commentsCol.classList.add("comment-inline--active");
+			setTimeout(() => {
+				commentsCol.classList.remove("comment-inline--active");
+			}, 600);
+		};
+		const initialCommentVisible =
+			Boolean(saved.showComments) || Boolean(saved.comments && saved.comments.trim().length > 0);
+		updateCommentVisibility(initialCommentVisible, { persist: false });
+		refreshCommentToggleLabel();
+		commentToggle.addEventListener("click", () => {
+			const nextVisible = commentToggle.getAttribute("aria-pressed") !== "true";
+			updateCommentVisibility(nextVisible, { focus: nextVisible });
+		});
+
+		const ignoredInfoCol = document.createElement("div");
+		ignoredInfoCol.className = "col-ignored-info";
+
+		const renderIgnoredBadge = () => {
+			ignoredInfoCol.textContent = "";
+			const label = saved.deleted ? "DELETED" : saved.missing ? "FORM MISSING" : "";
+			if (!label) return;
+			const badge = document.createElement("button");
+			badge.type = "button";
+			badge.className = "ignored-pill";
+			if (saved.deleted) badge.classList.add("ignored-pill--deleted");
+			if (saved.missing) badge.classList.add("ignored-pill--missing");
+			badge.textContent = label;
+			badge.title = "Click to restore this form";
+			badge.addEventListener("click", () => {
+				if (saved.deleted) {
+					toggleIgnoredState("deleted");
+				} else if (saved.missing) {
+					toggleIgnoredState("missing");
+				}
+			});
+			ignoredInfoCol.appendChild(badge);
+		};
+
+		const applyIgnoredState = () => {
+			const ignored = saved.deleted || saved.missing;
+			row.classList.toggle("row-ignored", ignored);
+			btnDeleted.classList.toggle("active", saved.deleted);
+			btnMissing.classList.toggle("active", saved.missing);
+			btnDeleted.setAttribute("aria-pressed", saved.deleted ? "true" : "false");
+			btnMissing.setAttribute("aria-pressed", saved.missing ? "true" : "false");
+			renderIgnoredBadge();
+			ignoredInfoCol.style.display = ignored ? "" : "none";
+			if (ignored) {
+				actionsCol.style.display = "none";
+				status1Col.style.display = "none";
+				status2Col.style.display = "none";
+				addSecondBtn.style.display = "none";
+				commentsCol.style.display = "none";
+				updateCommentVisibility(false, { persist: false });
+			} else {
+				actionsCol.style.display = "";
+				status1Col.style.display = saved.haveForm ? "" : "none";
+				const showSecond = Boolean(saved.haveForm && saved.showSecondStatus);
+				status2Col.style.display = showSecond ? "" : "none";
+				addSecondBtn.style.display = saved.haveForm && !showSecond ? "" : "none";
+				commentsCol.style.display = "";
+				const shouldShowComments =
+					Boolean(saved.comments && saved.comments.trim().length > 0) || Boolean(saved.showComments);
+				updateCommentVisibility(shouldShowComments, { persist: false });
+			}
+		};
+
+		const toggleIgnoredState = (mode) => {
+			const activating = mode === "deleted" ? !saved.deleted : !saved.missing;
+			if (mode === "deleted") {
+				saved.deleted = activating;
+				if (activating) saved.missing = false;
+			} else {
+				saved.missing = activating;
+				if (activating) saved.deleted = false;
+			}
+			if (saved.deleted || saved.missing) {
+				saved.distributed = false;
+				saved.takenBack = false;
+				saved.haveForm = false;
+				saved.missedForm = false;
+				saved.showSecondStatus = false;
+				saved.status1 = "";
+				saved.status2 = "";
+				saved.showComments = false;
+				btnDist.className = "btn-muted";
+				btnBack.className = "btn-muted";
+				btnHave.className = "btn-muted";
+				btnMissed.className = "btn-muted";
+			} else {
+				btnDist.className = saved.distributed ? "btn-dist" : "btn-muted";
+				btnBack.className = saved.takenBack ? "btn-back" : "btn-muted";
+				btnHave.className = saved.haveForm ? "btn-have" : "btn-muted";
+				btnMissed.className = saved.missedForm ? "btn-missed" : "btn-muted";
+			}
+			refreshRowVisuals();
+			syncDistributedMetaVisibility();
+			applyIgnoredState();
+			saveRowState(id, saved);
+			recalcHeaderStatusVisibility();
+		};
+
+		btnDeleted.addEventListener("click", () => toggleIgnoredState("deleted"));
+		btnMissing.addEventListener("click", () => toggleIgnoredState("missing"));
 
 		// Handlers
 		btnDist.addEventListener("click", async () => {
@@ -1111,12 +1293,15 @@
 				saved.haveForm = false;
 				saved.distributed = true;
 				saved.takenBack = false;
+				saved.missedForm = false;
 				saved.distributionType = "self";
 				btnHave.className = "btn-muted";
 				btnBack.className = "btn-muted";
+				btnMissed.className = "btn-muted";
 				status1Col.style.display = "none";
 				status2Col.style.display = "none";
 				addSecondBtn.style.display = "none";
+				updateCommentVisibility(false, { persist: false });
 				btnDist.className = "btn-dist";
 				syncDistributedMetaVisibility();
 				refreshRowVisuals();
@@ -1132,6 +1317,10 @@
 			const next = !saved.distributed;
 			saved.distributed = next;
 			saved.distributionType = "self";
+			if (!next) {
+				saved.missedForm = false;
+				btnMissed.className = "btn-muted";
+			}
 			btnDist.className = next ? "btn-dist" : "btn-muted";
 			syncDistributedMetaVisibility();
 			refreshRowVisuals();
@@ -1152,7 +1341,7 @@
 					if (!proceed) return;
 				}
 				if (saved.takenBack) {
-					const confirmMessage = "You're changing from 'Taken back form' to 'I have form'. Continue?";
+				const confirmMessage = "You're changing from 'Collected form' to 'I have form'. Continue?";
 					const proceed = await showConfirm(confirmMessage);
 					if (!proceed) return;
 				}
@@ -1164,9 +1353,11 @@
 			if (next) {
 				saved.distributed = false;
 				saved.takenBack = false;
+				saved.missedForm = false;
 				saved.distributionType = "self";
 				btnDist.className = "btn-muted";
 				btnBack.className = "btn-muted";
+				btnMissed.className = "btn-muted";
 				refreshRowVisuals();
 				status1Col.style.display = "";
 				// Show second status only if previously added
@@ -1178,6 +1369,7 @@
 				addSecondBtn.style.display = "none";
 				btnDist.className = saved.distributed ? "btn-dist" : "btn-muted";
 				btnBack.className = saved.takenBack ? "btn-back" : "btn-muted";
+				btnMissed.className = saved.missedForm ? "btn-missed" : "btn-muted";
 				refreshRowVisuals();
 			}
 			syncDistributedMetaVisibility();
@@ -1188,45 +1380,79 @@
 		btnBack.addEventListener("click", async () => {
 			if (saved.haveForm) return; // disabled when have form
 			if (saved.takenBack) {
-				const confirmMessage = "You're changing from 'Taken back form' to 'Not taken back'. Continue?";
+				const confirmMessage = "You're changing from 'Collected form' to 'Not collected'. Continue?";
 				const proceed = await showConfirm(confirmMessage);
+				if (!proceed) return;
+			} else if (saved.missedForm) {
+				const proceed = await showConfirm(
+					"This form is marked as 'Didn't get back form'. Mark it as 'Collected form' instead?"
+				);
 				if (!proceed) return;
 			}
 			const next = !saved.takenBack;
 			saved.takenBack = next;
+			if (next) {
+				saved.missedForm = false;
+				btnMissed.className = "btn-muted";
+			} else if (saved.missedForm) {
+				btnMissed.className = "btn-missed";
+			}
 			btnBack.className = next ? "btn-back" : "btn-muted";
 			refreshRowVisuals();
 			saveRowState(id, saved);
 		});
 
+		btnMissed.addEventListener("click", async () => {
+			const next = !saved.missedForm;
+			if (next) {
+				if (saved.haveForm) {
+					const proceed = await showConfirm("Marking 'Didn't get back form' will clear 'I have form'. Continue?");
+					if (!proceed) return;
+				}
+				if (saved.takenBack) {
+					const proceed = await showConfirm("Marking 'Didn't get back form' will clear 'Collected form'. Continue?");
+					if (!proceed) return;
+				}
+		} else {
+			const proceed = await showConfirm("You're unchecking 'Didn't get back form'. Continue?");
+			if (!proceed) return;
+		}
+			saved.missedForm = next;
+			if (next) {
+				saved.haveForm = false;
+				saved.takenBack = false;
+				saved.distributed = true;
+				saved.distributionType = "self";
+				btnHave.className = "btn-muted";
+				btnBack.className = "btn-muted";
+				btnDist.className = "btn-dist";
+				status1Col.style.display = "none";
+				status2Col.style.display = "none";
+				addSecondBtn.style.display = "none";
+				highlightComment({ focus: true });
+				recalcHeaderStatusVisibility();
+			} else {
+				const keepOpen = Boolean(saved.comments && saved.comments.trim().length > 0);
+				updateCommentVisibility(keepOpen, { persist: false });
+				btnBack.className = saved.takenBack ? "btn-back" : "btn-muted";
+				btnDist.className = saved.distributed ? "btn-dist" : "btn-muted";
+			}
+			btnMissed.className = next ? "btn-missed" : "btn-muted";
+			syncDistributedMetaVisibility();
+			refreshRowVisuals();
+			saveRowState(id, saved);
+			recalcHeaderStatusVisibility();
+		});
+
 		distributedSelect.addEventListener("change", () => {
 			const nextValue = distributedSelect.value === "given" ? "given" : "self";
 			saved.distributionType = nextValue;
-			let shouldFocusComment = false;
 			if (nextValue === "given") {
-				if (commentsCol.style.display === "none") {
-					commentsCol.style.display = "";
-				}
-				btnComment.textContent = "Hide comment";
-				saved.showComments = true;
-				shouldFocusComment = true;
+				highlightComment({ focus: true });
+			} else if (!saved.comments || !saved.comments.trim().length) {
+				updateCommentVisibility(false, { persist: false });
 			}
 			saveRowState(id, saved);
-			if (shouldFocusComment) {
-				requestAnimationFrame(focusCommentInput);
-			}
-		});
-
-		btnComment.addEventListener("click", () => {
-			const visible = commentsCol.style.display !== "none";
-			const nextVisible = !visible;
-			commentsCol.style.display = nextVisible ? "" : "none";
-			btnComment.textContent = nextVisible ? "Hide comment" : "Comment";
-			saved.showComments = nextVisible;
-			saveRowState(id, saved);
-			if (nextVisible) {
-				focusCommentInput();
-			}
 		});
 
 		select1.addEventListener("change", () => {
@@ -1247,8 +1473,12 @@
 		});
 		textarea.addEventListener("input", () => {
 			saved.comments = textarea.value;
+			const isVisible = !commentsCol.classList.contains("comment-inline--collapsed");
+			refreshCommentToggleLabel(isVisible);
 			saveRowState(id, saved);
 		});
+
+		applyIgnoredState();
 
 		// Assemble
 		row.appendChild(numCol);
@@ -1256,6 +1486,7 @@
 		row.appendChild(status1Col);
 		row.appendChild(status2Col);
 		row.appendChild(commentsCol);
+		row.appendChild(ignoredInfoCol);
 
 		return row;
 	}
@@ -1268,10 +1499,19 @@
 		const hasComments = typeof row.comments === "string" && row.comments.trim().length > 0;
 		const trimmedComment = hasComments ? row.comments.trim() : "";
 
-		if (row.haveForm) {
+		if (row.deleted) {
+			summary.title = "Deleted";
+			if (hasComments) summary.details.push(trimmedComment);
+		} else if (row.missing) {
+			summary.title = "Form missing";
+			if (hasComments) summary.details.push(trimmedComment);
+		} else if (row.haveForm) {
 			summary.title = "I have form";
 			const statuses = [row.status1, row.status2].map((s) => (typeof s === "string" ? s.trim() : "")).filter(Boolean);
 			if (statuses.length) summary.details.push(statuses.join(", "));
+			if (hasComments) summary.details.push(trimmedComment);
+		} else if (row.missedForm) {
+			summary.title = "Not returned";
 			if (hasComments) summary.details.push(trimmedComment);
 		} else if (row.distributed && row.takenBack) {
 			summary.title = "Completed";
@@ -1282,7 +1522,7 @@
 			if (row.distributionType === "given") summary.details.push("Given to");
 			if (hasComments) summary.details.push(trimmedComment);
 		} else if (row.takenBack) {
-			summary.title = "Taken back form";
+			summary.title = "Collected form";
 			if (hasComments) summary.details.push(trimmedComment);
 		} else if (hasComments) {
 			summary.details.push(trimmedComment);
@@ -1295,7 +1535,8 @@
 		const totals = {
 			distributed: 0,
 			takenBack: 0,
-			haveForm: 0
+			haveForm: 0,
+			missed: 0
 		};
 		if (!Array.isArray(rows)) {
 			return totals;
@@ -1305,13 +1546,14 @@
 			if (row.distributed) totals.distributed += 1;
 			if (row.takenBack) totals.takenBack += 1;
 			if (row.haveForm) totals.haveForm += 1;
+			if (row.missedForm) totals.missed += 1;
 		}
 		return totals;
 	}
 
 	function formatRowStatsLine(stats) {
-		const totals = stats || { distributed: 0, takenBack: 0, haveForm: 0 };
-		return `Distributed: ${totals.distributed}  •  Collected: ${totals.takenBack}  •  I Have: ${totals.haveForm}`;
+		const totals = stats || { distributed: 0, takenBack: 0, haveForm: 0, missed: 0 };
+		return `Distributed: ${totals.distributed}  •  Not Returned: ${totals.missed}  •  Collected: ${totals.takenBack}  •  I Have: ${totals.haveForm}`;
 	}
 
 	function renderList(n) {
@@ -1623,7 +1865,22 @@
 		}
 		const workbook = XLSX.utils.book_new();
 		const formsSheetData = [
-			["FormNumber", "GroupName", "Distributed", "TakenBack", "HaveForm", "DistributionType", "Status1", "Status2", "Comments", "ShowSecondStatus", "ShowComments"]
+			[
+				"FormNumber",
+				"GroupName",
+				"Distributed",
+				"TakenBack",
+				"NotReturned",
+				"Deleted",
+				"FormMissing",
+				"HaveForm",
+				"DistributionType",
+				"Status1",
+				"Status2",
+				"Comments",
+				"ShowSecondStatus",
+				"ShowComments"
+			]
 		];
 		for (const row of snapshot.rows) {
 			formsSheetData.push([
@@ -1631,6 +1888,9 @@
 				row.groupName || "",
 				row.distributed ? "Yes" : "No",
 				row.takenBack ? "Yes" : "No",
+				row.missedForm ? "Yes" : "No",
+				row.deleted ? "Yes" : "No",
+				row.missing ? "Yes" : "No",
 				row.haveForm ? "Yes" : "No",
 				row.distributionType === "given" ? "Given to" : "Self Taken",
 				row.status1,
@@ -1712,6 +1972,9 @@
 				const normalized = normalizeRowState({
 					distributed: row.Distributed,
 					takenBack: row.TakenBack,
+					missedForm: row.NotReturned ?? row["NotReturned"] ?? row["Not Returned"] ?? row.Missed ?? row.DidntReceiveBack ?? row.didntReceiveBack,
+					deleted: row.Deleted ?? row.deleted ?? row["IsDeleted"],
+					missing: row.FormMissing ?? row.formMissing ?? row.Missing ?? row["Form Missing"],
 					haveForm: row.HaveForm,
 					distributionType: row.DistributionType,
 					showSecondStatus: row.ShowSecondStatus,
