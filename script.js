@@ -18,6 +18,13 @@
 		settingsModal: document.getElementById("settingsModal"),
 		settingsClose: document.getElementById("settingsClose"),
 		themeToggle: document.getElementById("themeToggle"),
+		searchPanel: document.getElementById("searchPanel"),
+		searchInput: document.getElementById("searchInput"),
+		searchSubmit: document.getElementById("searchSubmit"),
+		searchStatus: document.getElementById("searchStatus"),
+		searchPrev: document.getElementById("searchPrev"),
+		searchNext: document.getElementById("searchNext"),
+		searchDone: document.getElementById("searchDone"),
 		installBtn: document.getElementById("installBtn"),
 		controls: document.querySelector(".controls"),
 		warning: document.getElementById("warning"),
@@ -69,6 +76,10 @@
 	let deferredInstallPrompt = null;
 	let installMessageTimeout = null;
 	let societyEditState = null;
+	let searchState = null;
+	let lastSearchRow = null;
+	const groupRenderers = new Map();
+	let searchHeightRaf = null;
 
 	function isAppMarkedInstalled() {
 		return localStorage.getItem(storageInstalledKey) === "1";
@@ -796,7 +807,10 @@
 			comments: "",
 			showComments: false,
 			deleted: false,
-			missing: false
+			missing: false,
+			name: "",
+			phone: "",
+			epic: ""
 		};
 		if (!raw || typeof raw !== "object") return state;
 		state.distributed = coerceBoolean(raw.distributed);
@@ -825,6 +839,9 @@
 		state.showComments = coerceBoolean(raw.showComments);
 		state.deleted = coerceBoolean(raw.deleted ?? raw.isDeleted ?? raw.removed);
 		state.missing = coerceBoolean(raw.missing ?? raw.formMissing ?? raw.isMissing);
+		state.name = coerceString(raw.name ?? raw.personName ?? raw.fullName).trim();
+		state.phone = coerceString(raw.phone ?? raw.phoneNumber ?? raw.contactNumber ?? raw.mobile).trim();
+		state.epic = coerceString(raw.epic ?? raw.epicNumber ?? raw.epicNo ?? raw.epicId ?? raw.epicCode).trim();
 		if (state.status2 && !state.showSecondStatus) {
 			state.showSecondStatus = true;
 		}
@@ -1008,6 +1025,8 @@
 
 		const row = document.createElement("div");
 		row.className = "row";
+		row.dataset.formId = String(id);
+		const infoFieldControllers = [];
 		function refreshRowVisuals() {
 			row.classList.remove(
 				"state-dist-yes",
@@ -1049,6 +1068,192 @@
 		actionsCol.className = "col-actions";
 		const actionsWrap = document.createElement("div");
 		actionsWrap.className = "actions";
+		const infoBar = document.createElement("div");
+		infoBar.className = "row-info-bar";
+		const infoFields = document.createElement("div");
+		infoFields.className = "row-info-fields";
+		infoBar.appendChild(infoFields);
+
+		const createInfoField = (fieldKey, config) => {
+			const fieldContainer = document.createElement("div");
+			fieldContainer.className = "row-info-field";
+
+			const triggerButton = document.createElement("button");
+			triggerButton.type = "button";
+			triggerButton.className = "row-info-add";
+			triggerButton.textContent = config.addLabel;
+			triggerButton.setAttribute("aria-haspopup", "true");
+			triggerButton.setAttribute("aria-expanded", "false");
+
+			const displayWrap = document.createElement("div");
+			displayWrap.className = "row-info-display";
+			let labelSpan = null;
+			if (config.showLabel !== false) {
+				labelSpan = document.createElement("span");
+				labelSpan.className = "row-info-label";
+				labelSpan.textContent = `${config.label}:`;
+				displayWrap.appendChild(labelSpan);
+			}
+			const valueSpan = document.createElement("span");
+			valueSpan.className = "row-info-value";
+			displayWrap.appendChild(valueSpan);
+
+			const inputWrap = document.createElement("div");
+			inputWrap.className = "row-info-input";
+			const input = document.createElement("input");
+			input.type = config.type || "text";
+			input.placeholder = config.placeholder;
+			input.autocomplete = config.autocomplete || "off";
+			input.enterKeyHint = "done";
+			if (config.inputMode) {
+				input.setAttribute("inputmode", config.inputMode);
+			}
+			if (config.pattern) {
+				input.setAttribute("pattern", config.pattern);
+			}
+			const doneButton = document.createElement("button");
+			doneButton.type = "button";
+			doneButton.className = "row-info-done";
+			doneButton.textContent = "Done";
+			inputWrap.appendChild(input);
+			inputWrap.appendChild(doneButton);
+
+			const setMode = (mode) => {
+				if (saved.deleted || saved.missing) {
+					triggerButton.style.display = "none";
+					displayWrap.style.display = "none";
+					inputWrap.style.display = "none";
+					return;
+				}
+				triggerButton.style.display = mode === "add" ? "" : "none";
+				displayWrap.style.display = mode === "display" ? "" : "none";
+				inputWrap.style.display = mode === "edit" ? "" : "none";
+				triggerButton.setAttribute("aria-expanded", mode === "edit" ? "true" : "false");
+			};
+
+			const getCurrentValue = () => {
+				const value = saved[fieldKey];
+				return typeof value === "string" ? value.trim() : "";
+			};
+
+			const refresh = () => {
+				const current = getCurrentValue();
+				if (current) {
+					valueSpan.textContent = current;
+					setMode("display");
+				} else {
+					valueSpan.textContent = "";
+					input.value = "";
+					setMode("add");
+				}
+			};
+
+			const openEditor = () => {
+				input.value = getCurrentValue();
+				setMode("edit");
+				requestAnimationFrame(() => {
+					input.focus();
+					const len = input.value.length;
+					if (typeof input.setSelectionRange === "function") {
+						try {
+							input.setSelectionRange(len, len);
+						} catch {
+							// ignore
+						}
+					}
+				});
+			};
+
+			const handleSubmit = () => {
+				const nextValue = input.value.trim();
+				if (!nextValue) {
+					saved[fieldKey] = "";
+					saveRowState(id, saved);
+					refresh();
+					return;
+				}
+				saved[fieldKey] = nextValue;
+				valueSpan.textContent = nextValue;
+				saveRowState(id, saved);
+				setMode("display");
+			};
+
+			const handleCancel = () => {
+				const current = getCurrentValue();
+				if (current) {
+					valueSpan.textContent = current;
+					setMode("display");
+				} else {
+					refresh();
+				}
+			};
+
+			triggerButton.addEventListener("click", (event) => {
+				event.preventDefault();
+				openEditor();
+			});
+
+			displayWrap.addEventListener("click", (event) => {
+				event.preventDefault();
+				openEditor();
+			});
+
+			doneButton.addEventListener("click", (event) => {
+				event.preventDefault();
+				handleSubmit();
+			});
+
+			input.addEventListener("keydown", (event) => {
+				if (event.key === "Enter") {
+					event.preventDefault();
+					handleSubmit();
+				} else if (event.key === "Escape") {
+					event.preventDefault();
+					handleCancel();
+				}
+			});
+
+			fieldContainer.appendChild(triggerButton);
+			fieldContainer.appendChild(displayWrap);
+			fieldContainer.appendChild(inputWrap);
+			infoFields.appendChild(fieldContainer);
+
+			refresh();
+			infoFieldControllers.push({ refresh });
+		};
+
+		createInfoField("name", {
+			label: "Name",
+			addLabel: "Name",
+			placeholder: "Enter name",
+			type: "text",
+			autocomplete: "name",
+			showLabel: false
+		});
+
+		createInfoField("phone", {
+			label: "Phone #",
+			addLabel: "Phone #",
+			placeholder: "Enter phone number",
+			type: "tel",
+			inputMode: "numeric",
+			pattern: "[0-9]*",
+			autocomplete: "tel"
+		});
+
+		createInfoField("epic", {
+			label: "EPIC #",
+			addLabel: "EPIC #",
+			placeholder: "Enter EPIC number",
+			type: "tel",
+			inputMode: "numeric",
+			pattern: "[0-9]*",
+			autocomplete: "off"
+		});
+
+		if (!saved.deleted && !saved.missing) {
+			row.appendChild(infoBar);
+		}
 		const btnDist = document.createElement("button");
 		btnDist.className = saved.distributed ? "btn-dist" : "btn-muted";
 		btnDist.textContent = "Distributed form";
@@ -1226,6 +1431,9 @@
 			btnMissing.setAttribute("aria-pressed", saved.missing ? "true" : "false");
 			renderIgnoredBadge();
 			ignoredInfoCol.style.display = ignored ? "" : "none";
+			if (infoBar) {
+				infoBar.style.display = ignored ? "none" : "";
+			}
 			if (ignored) {
 				actionsCol.style.display = "none";
 				status1Col.style.display = "none";
@@ -1243,6 +1451,11 @@
 				const shouldShowComments =
 					Boolean(saved.comments && saved.comments.trim().length > 0) || Boolean(saved.showComments);
 				updateCommentVisibility(shouldShowComments, { persist: false });
+				for (const controller of infoFieldControllers) {
+					if (controller && typeof controller.refresh === "function") {
+						controller.refresh();
+					}
+				}
 			}
 		};
 
@@ -1491,6 +1704,204 @@
 		return row;
 	}
 
+	function waitForFrame() {
+		return new Promise((resolve) => requestAnimationFrame(resolve));
+	}
+
+	function queueSearchBarHeightSync() {
+		if (!els.searchPanel) return;
+		if (searchHeightRaf != null) return;
+		searchHeightRaf = requestAnimationFrame(() => {
+			searchHeightRaf = null;
+			if (!els.searchPanel) return;
+			const height = els.searchPanel.offsetHeight || 0;
+			if (height > 0) {
+				document.documentElement.style.setProperty("--search-bar-height", `${height}px`);
+			}
+		});
+	}
+
+	function setSearchStatus(message) {
+		if (els.searchStatus) {
+			els.searchStatus.textContent = message || "";
+		}
+		queueSearchBarHeightSync();
+	}
+
+	function clearSearchHighlight() {
+		if (lastSearchRow) {
+			lastSearchRow.classList.remove("row-search-highlight");
+			lastSearchRow = null;
+		}
+	}
+
+	function updateSearchNavigation() {
+		if (!els.searchPrev || !els.searchNext || !els.searchDone) return;
+		if (!searchState || !Array.isArray(searchState.matches) || searchState.matches.length === 0) {
+			els.searchPrev.classList.add("hidden");
+			els.searchNext.classList.add("hidden");
+			els.searchDone.classList.add("hidden");
+			els.searchPrev.disabled = true;
+			els.searchNext.disabled = true;
+			els.searchDone.disabled = false;
+			queueSearchBarHeightSync();
+			return;
+		}
+		const { matches, index } = searchState;
+		const total = matches.length;
+		const hasMultiple = total > 1;
+		els.searchPrev.classList.toggle("hidden", !hasMultiple);
+		els.searchNext.classList.toggle("hidden", !hasMultiple);
+		els.searchDone.classList.remove("hidden");
+		els.searchPrev.disabled = index <= 0;
+		els.searchNext.disabled = index >= total - 1;
+		els.searchDone.disabled = false;
+		queueSearchBarHeightSync();
+	}
+
+	async function revealRowElement(formNumber) {
+		if (!Number.isFinite(formNumber)) return null;
+		const selector = `.row[data-form-id="${formNumber}"]`;
+		let row = els.list.querySelector(selector);
+		if (row) return row;
+		const groups = getGroupsSorted();
+		const group = findGroupForForm(formNumber, groups);
+		const targetGroupId = (group ? group.id : "ungrouped") || "ungrouped";
+		let details = els.list.querySelector(`.society[data-group-id="${targetGroupId}"]`);
+		const rendererEntry = groupRenderers.get(targetGroupId);
+		if (!details && rendererEntry && rendererEntry.details) {
+			details = rendererEntry.details;
+		}
+		if (rendererEntry && rendererEntry.body && rendererEntry.body.childElementCount === 0) {
+			rendererEntry.render();
+		}
+		if (!details) return null;
+		if (!details.open) {
+			details.open = true;
+		}
+		await waitForFrame();
+		row = els.list.querySelector(selector);
+		if (!row) {
+			if (rendererEntry) {
+				rendererEntry.render();
+			}
+			await waitForFrame();
+			row = els.list.querySelector(selector);
+		}
+		return row || null;
+	}
+
+	function formatSearchStatus(index, total, formNumber, query, mode) {
+		if (total <= 1) {
+			if (mode === "number") {
+				return `Form ${formNumber} found.`;
+			}
+			return `Found form ${formNumber} for "${query}".`;
+		}
+		return `Result ${index + 1} of ${total} for "${query}" • Form ${formNumber}`;
+	}
+
+	async function focusSearchResult(index) {
+		if (!searchState || !Array.isArray(searchState.matches) || searchState.matches.length === 0) return;
+		if (index < 0 || index >= searchState.matches.length) return;
+		searchState.index = index;
+		updateSearchNavigation();
+		const formNumber = searchState.matches[index];
+		const row = await revealRowElement(formNumber);
+		if (!row) {
+			setSearchStatus(`Unable to locate form ${formNumber}.`);
+			return;
+		}
+		if (lastSearchRow && lastSearchRow !== row) {
+			lastSearchRow.classList.remove("row-search-highlight");
+		}
+		row.classList.add("row-search-highlight");
+		lastSearchRow = row;
+		row.scrollIntoView({ behavior: "smooth", block: "center" });
+		setSearchStatus(
+			formatSearchStatus(index, searchState.matches.length, formNumber, searchState.query, searchState.mode)
+		);
+	}
+
+	function collectNameMatches(query) {
+		const normalized = query.trim().toLowerCase();
+		const count = getSavedCount();
+		if (!normalized || !Number.isFinite(count) || count <= 0) {
+			return [];
+		}
+		const matches = [];
+		for (let formNumber = 1; formNumber <= count; formNumber++) {
+			const state = getRowState(formNumber);
+			if (state.deleted || state.missing) continue;
+			if (state.name && state.name.toLowerCase().includes(normalized)) {
+				matches.push(formNumber);
+			}
+		}
+		return matches;
+	}
+
+	async function performSearch() {
+		if (!els.searchInput) return;
+		const rawQuery = els.searchInput.value || "";
+		const query = rawQuery.trim();
+		if (!query) {
+			setSearchStatus("");
+			searchState = null;
+			updateSearchNavigation();
+			clearSearchHighlight();
+			return;
+		}
+		const count = getSavedCount();
+		if (!Number.isFinite(count) || count <= 0) {
+			setSearchStatus("Generate forms before searching.");
+			searchState = null;
+			updateSearchNavigation();
+			clearSearchHighlight();
+			return;
+		}
+		let matches = [];
+		let mode = "name";
+		if (/^\d+$/.test(query)) {
+			mode = "number";
+			const numberMatch = Number.parseInt(query, 10);
+			if (Number.isFinite(numberMatch) && numberMatch >= 1 && numberMatch <= count) {
+				matches = [numberMatch];
+			}
+		} else {
+			matches = collectNameMatches(query);
+		}
+		if (!matches.length) {
+			setSearchStatus(`No matches for "${query}".`);
+			searchState = null;
+			updateSearchNavigation();
+			clearSearchHighlight();
+			return;
+		}
+		clearSearchHighlight();
+		searchState = {
+			query,
+			mode,
+			matches,
+			index: 0
+		};
+		updateSearchNavigation();
+		await focusSearchResult(0);
+	}
+
+	function completeSearchSession() {
+		if (!searchState || !Array.isArray(searchState.matches) || searchState.matches.length === 0) {
+			searchState = null;
+			updateSearchNavigation();
+			return;
+		}
+		const formNumber = searchState.matches[searchState.index] || searchState.matches[0];
+		setSearchStatus(
+			`Search paused at form ${formNumber} (${searchState.index + 1} of ${searchState.matches.length}) for "${searchState.query}".`
+		);
+		searchState = null;
+		updateSearchNavigation();
+	}
+
 	function buildRowSummary(row) {
 		const summary = {
 			title: "-",
@@ -1498,6 +1909,16 @@
 		};
 		const hasComments = typeof row.comments === "string" && row.comments.trim().length > 0;
 		const trimmedComment = hasComments ? row.comments.trim() : "";
+		const personalDetails = [];
+		const appendIfPresent = (label, value) => {
+			if (typeof value !== "string") return;
+			const trimmed = value.trim();
+			if (!trimmed) return;
+			personalDetails.push(`${label}: ${trimmed}`);
+		};
+		appendIfPresent("Name", row.name);
+		appendIfPresent("Phone #", row.phone);
+		appendIfPresent("EPIC #", row.epic);
 
 		if (row.deleted) {
 			summary.title = "Deleted";
@@ -1526,6 +1947,10 @@
 			if (hasComments) summary.details.push(trimmedComment);
 		} else if (hasComments) {
 			summary.details.push(trimmedComment);
+		}
+
+		if (personalDetails.length) {
+			summary.details = [...personalDetails, ...summary.details];
 		}
 
 		return summary;
@@ -1561,9 +1986,12 @@
 		els.list.textContent = "";
 		if (!Number.isFinite(n) || n <= 0) {
 			els.listHeader.classList.add("hidden");
+			groupRenderers.clear();
+			queueSearchBarHeightSync();
 			return;
 		}
 		els.listHeader.classList.remove("hidden");
+		groupRenderers.clear();
 
 		const groups = getGroupsSorted().map((group) => ({ ...group, numbers: [] }));
 		const ungrouped = [];
@@ -1584,7 +2012,19 @@
 			if (!hasRows && isUngrouped) return;
 			const details = document.createElement("details");
 			details.className = "society";
-			const groupId = isUngrouped ? "ungrouped" : group.id;
+			const groupIdRaw = isUngrouped ? "ungrouped" : group.id;
+			const groupId = groupIdRaw || "ungrouped";
+			details.dataset.groupId = groupId;
+			if (numbers.length > 0) {
+				details.dataset.rangeStart = String(numbers[0]);
+				details.dataset.rangeEnd = String(numbers[numbers.length - 1]);
+			} else if (!isUngrouped && group) {
+				details.dataset.rangeStart = String(group.start);
+				details.dataset.rangeEnd = String(group.end);
+			} else {
+				details.dataset.rangeStart = "";
+				details.dataset.rangeEnd = "";
+			}
 			if (getGroupOpenState(groupId)) {
 				details.open = true;
 			}
@@ -1622,6 +2062,11 @@
 				renderRowsIntoBody();
 			}
 			details.appendChild(body);
+			groupRenderers.set(groupId, {
+				render: renderRowsIntoBody,
+				body,
+				details
+			});
 			details.addEventListener("toggle", () => {
 				setGroupOpenState(groupId, details.open);
 				if (details.open) {
@@ -1639,6 +2084,14 @@
 
 		els.list.appendChild(fragment);
 		recalcHeaderStatusVisibility();
+		if (searchState && Array.isArray(searchState.matches) && searchState.matches.length > 0) {
+			const safeIndex = Math.min(searchState.index, searchState.matches.length - 1);
+			searchState.index = safeIndex;
+			void focusSearchResult(safeIndex);
+		} else {
+			updateSearchNavigation();
+		}
+		queueSearchBarHeightSync();
 	}
 
 	async function handleGenerate() {
@@ -1868,6 +2321,9 @@
 			[
 				"FormNumber",
 				"GroupName",
+				"Name",
+				"PhoneNumber",
+				"EpicNumber",
 				"Distributed",
 				"TakenBack",
 				"NotReturned",
@@ -1886,6 +2342,9 @@
 			formsSheetData.push([
 				row.formNumber,
 				row.groupName || "",
+				row.name || "",
+				row.phone || "",
+				row.epic || "",
 				row.distributed ? "Yes" : "No",
 				row.takenBack ? "Yes" : "No",
 				row.missedForm ? "Yes" : "No",
@@ -1981,7 +2440,10 @@
 					status1: row.Status1,
 					status2: row.Status2,
 					comments: row.Comments,
-					showComments: row.ShowComments
+					showComments: row.ShowComments,
+					name: row.Name ?? row.name ?? row["FullName"] ?? row.FullName,
+					phone: row.PhoneNumber ?? row.Phone ?? row.phone ?? row["ContactNumber"] ?? row.contactNumber,
+					epic: row.EpicNumber ?? row.Epic ?? row.epic ?? row["EPIC Number"] ?? row.EPICNumber
 				});
 				stateMap.set(formNumber, normalized);
 			}
@@ -2198,6 +2660,45 @@
 			}
 		});
 	}
+	if (els.searchSubmit) {
+		els.searchSubmit.addEventListener("click", () => {
+			void performSearch();
+		});
+	}
+	if (els.searchInput) {
+		els.searchInput.addEventListener("keyup", (event) => {
+			if (event.key === "Enter") {
+				event.preventDefault();
+				void performSearch();
+			}
+		});
+	}
+	if (els.searchNext) {
+		els.searchNext.addEventListener("click", () => {
+			if (!searchState || !Array.isArray(searchState.matches) || searchState.matches.length === 0) return;
+			const nextIndex = Math.min(searchState.index + 1, searchState.matches.length - 1);
+			if (nextIndex !== searchState.index) {
+				void focusSearchResult(nextIndex);
+			}
+		});
+	}
+	if (els.searchPrev) {
+		els.searchPrev.addEventListener("click", () => {
+			if (!searchState || !Array.isArray(searchState.matches) || searchState.matches.length === 0) return;
+			const prevIndex = Math.max(searchState.index - 1, 0);
+			if (prevIndex !== searchState.index) {
+				void focusSearchResult(prevIndex);
+			}
+		});
+	}
+	if (els.searchDone) {
+		els.searchDone.addEventListener("click", () => {
+			completeSearchSession();
+		});
+	}
+	window.addEventListener("resize", queueSearchBarHeightSync);
+	queueSearchBarHeightSync();
+	updateSearchNavigation();
 	window.addEventListener("beforeinstallprompt", (event) => {
 		event.preventDefault();
 		if (isAppMarkedInstalled()) {
