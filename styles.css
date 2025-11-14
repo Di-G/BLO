@@ -402,12 +402,19 @@ button.danger:hover {
 }
 .society-item {
 	display: flex;
-	align-items: center;
-	justify-content: space-between;
+	flex-direction: column;
+	gap: 8px;
+	align-items: stretch;
 	background: var(--surface-2);
 	padding: 8px 10px;
 	border-radius: 6px;
 	border: 1px solid var(--border);
+}
+.society-item-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
 }
 .society-item-info {
 	display: flex;
@@ -422,8 +429,70 @@ button.danger:hover {
 	color: var(--muted);
 	font-size: 12px;
 }
+.society-item-actions {
+	display: flex;
+	gap: 6px;
+}
 .society-item button {
 	padding: 6px 10px;
+}
+.society-icon-btn {
+	background: var(--surface-2);
+	color: var(--text);
+	border: 1px solid var(--border);
+	padding: 6px;
+	width: 36px;
+	min-width: 36px;
+	height: 36px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: 6px;
+	font-size: 18px;
+	line-height: 1;
+}
+.society-icon-btn span {
+	pointer-events: none;
+}
+.society-icon-btn:hover:not(:disabled) {
+	filter: brightness(1.05);
+}
+.society-icon-btn:disabled {
+	opacity: 0.6;
+	cursor: not-allowed;
+}
+.society-edit {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+.society-edit-fields {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+.society-edit-fields input[type="text"] {
+	flex: 1 1 220px;
+	min-width: 200px;
+}
+.society-edit-fields input[type="number"] {
+	width: 140px;
+}
+.society-edit-actions {
+	display: flex;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+.society-edit-error {
+	color: var(--danger);
+	font-size: 13px;
+	min-height: 16px;
+}
+.society-empty {
+	margin: 4px 0 0;
+	font-size: 13px;
+	color: var(--muted);
+	font-style: italic;
 }
 
 .container {

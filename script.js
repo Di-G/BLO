@@ -68,6 +68,7 @@
 
 	let deferredInstallPrompt = null;
 	let installMessageTimeout = null;
+	let societyEditState = null;
 
 	function isAppMarkedInstalled() {
 		return localStorage.getItem(storageInstalledKey) === "1";
@@ -442,6 +443,87 @@
 		return true;
 	}
 
+	function startSocietyEdit(group) {
+		if (!group) return;
+		societyEditState = {
+			id: group.id,
+			name: group.name,
+			start: String(group.start),
+			end: String(group.end),
+			error: ""
+		};
+		renderSocietyManager();
+		requestAnimationFrame(() => {
+			const editor = els.societyList
+				? els.societyList.querySelector('.society-item.editing input[name="societyEditName"]')
+				: null;
+			if (editor && typeof editor.focus === "function") {
+				editor.focus();
+			}
+		});
+	}
+
+	function cancelSocietyEdit() {
+		societyEditState = null;
+		renderSocietyManager();
+	}
+
+	function updateSocietyEditState(field, value) {
+		if (!societyEditState) return;
+		societyEditState[field] = value;
+	}
+
+	function handleSocietyEditSave(groupId) {
+		if (!societyEditState || societyEditState.id !== groupId) return;
+		const name = societyEditState.name ? societyEditState.name.trim() : "";
+		const startValue = societyEditState.start != null ? String(societyEditState.start).trim() : "";
+		const endValue = societyEditState.end != null ? String(societyEditState.end).trim() : "";
+		const start = Number.parseInt(startValue, 10);
+		const end = Number.parseInt(endValue, 10);
+
+		const setError = (message) => {
+			societyEditState.error = message;
+			renderSocietyManager();
+		};
+
+		if (!name) {
+			setError("Please enter a society name.");
+			return;
+		}
+		if (!Number.isFinite(start) || !Number.isFinite(end)) {
+			setError("Please enter valid start and end numbers.");
+			return;
+		}
+		if (start < 1 || end < 1 || start > MAX_FORMS || end > MAX_FORMS) {
+			setError(`Numbers must be between 1 and ${MAX_FORMS}.`);
+			return;
+		}
+		if (start > end) {
+			setError("Start number cannot be greater than end number.");
+			return;
+		}
+
+		const groups = loadGroups();
+		const targetIndex = groups.findIndex((group) => group.id === groupId);
+		if (targetIndex === -1) {
+			societyEditState = null;
+			renderSocietyManager();
+			return;
+		}
+		groups[targetIndex] = {
+			...groups[targetIndex],
+			name,
+			start,
+			end
+		};
+		saveGroups(groups);
+		societyEditState = null;
+		renderSocietyManager();
+		const count = getSavedCount();
+		if (count) renderList(count);
+		showSocietyError("");
+	}
+
 	function renderSocietyManager() {
 		if (!els.societyList) return;
 		const groups = getGroupsSorted();
@@ -455,41 +537,151 @@
 			return;
 		}
 		const totalForms = getSavedCount();
+		const computeCountLabel = (startValue, endValue) => {
+			if (!Number.isFinite(totalForms)) return "";
+			const startNum = Number.parseInt(startValue, 10);
+			const endNum = Number.parseInt(endValue, 10);
+			if (!Number.isFinite(startNum) || !Number.isFinite(endNum)) {
+				return " · 0 forms in current list";
+			}
+			const boundedStart = Math.max(1, startNum);
+			const boundedEnd = Math.min(totalForms, endNum);
+			const count = Math.max(0, boundedEnd - boundedStart + 1);
+			return count > 0 ? ` · ${count} form${count === 1 ? "" : "s"}` : " · 0 forms in current list";
+		};
+		const formatRangeValue = (value) => {
+			const trimmed = value == null ? "" : String(value).trim();
+			return trimmed === "" ? "?" : trimmed;
+		};
 		for (const group of groups) {
 			const item = document.createElement("li");
 			item.className = "society-item";
+			const isEditing = societyEditState && societyEditState.id === group.id;
+			if (isEditing) {
+				item.classList.add("editing");
+			}
+			const header = document.createElement("div");
+			header.className = "society-item-header";
 			const info = document.createElement("div");
 			info.className = "society-item-info";
 			const name = document.createElement("span");
 			name.className = "society-item-name";
-			name.textContent = group.name;
+			const displayName = isEditing ? societyEditState.name : group.name;
+			name.textContent = displayName || "Untitled society";
 			const range = document.createElement("span");
 			range.className = "society-item-range";
-			let countLabel = "";
-			if (Number.isFinite(totalForms)) {
-				const start = Math.max(1, group.start);
-				const end = Math.min(totalForms, group.end);
-				const count = Math.max(0, end - start + 1);
-				countLabel = count > 0 ? ` · ${count} form${count === 1 ? "" : "s"}` : " · 0 forms in current list";
-			}
-			range.textContent = `Numbers ${group.start}–${group.end}${countLabel}`;
+			const setRangeDisplay = (startValue, endValue) => {
+				const countLabel = computeCountLabel(startValue, endValue);
+				range.textContent = `Numbers ${formatRangeValue(startValue)}–${formatRangeValue(endValue)}${countLabel}`;
+			};
+			setRangeDisplay(isEditing ? societyEditState.start : group.start, isEditing ? societyEditState.end : group.end);
 			info.appendChild(name);
 			info.appendChild(range);
+			const actions = document.createElement("div");
+			actions.className = "society-item-actions";
+			const editBtn = document.createElement("button");
+			editBtn.type = "button";
+			editBtn.className = "society-icon-btn";
+			editBtn.innerHTML = '<span aria-hidden="true">✏️</span>';
+			editBtn.setAttribute("aria-label", `Edit ${group.name}`);
+			editBtn.title = "Edit";
+			editBtn.addEventListener("click", () => {
+				startSocietyEdit(group);
+			});
+			if (isEditing) {
+				editBtn.disabled = true;
+			}
 			const removeBtn = document.createElement("button");
 			removeBtn.type = "button";
-			removeBtn.className = "secondary";
-			removeBtn.textContent = "Remove";
+			removeBtn.className = "society-icon-btn";
+			removeBtn.innerHTML = '<span aria-hidden="true">🗑️</span>';
+			removeBtn.setAttribute("aria-label", `Remove ${group.name}`);
+			removeBtn.title = "Remove";
 			removeBtn.addEventListener("click", async () => {
 				const proceed = await showConfirm(`Remove society "${group.name}"?`);
 				if (!proceed) return;
+				if (societyEditState && societyEditState.id === group.id) {
+					societyEditState = null;
+				}
 				const remaining = loadGroups().filter((g) => g.id !== group.id);
 				saveGroups(remaining);
 				renderSocietyManager();
 				const count = getSavedCount();
 				if (count) renderList(count);
 			});
-			item.appendChild(info);
-			item.appendChild(removeBtn);
+			actions.appendChild(editBtn);
+			actions.appendChild(removeBtn);
+			header.appendChild(info);
+			header.appendChild(actions);
+			item.appendChild(header);
+			if (isEditing) {
+				const editBlock = document.createElement("div");
+				editBlock.className = "society-edit";
+				const fields = document.createElement("div");
+				fields.className = "society-edit-fields";
+				const error = document.createElement("p");
+				error.className = "society-edit-error";
+				error.textContent = societyEditState.error || "";
+				const nameInput = document.createElement("input");
+				nameInput.type = "text";
+				nameInput.name = "societyEditName";
+				nameInput.value = societyEditState.name;
+				nameInput.placeholder = "Society name";
+				nameInput.addEventListener("input", (event) => {
+					updateSocietyEditState("name", event.target.value);
+					name.textContent = event.target.value.trim() ? event.target.value : "Untitled society";
+					if (societyEditState.error) {
+						societyEditState.error = "";
+						error.textContent = "";
+					}
+				});
+				const startInput = document.createElement("input");
+				startInput.type = "number";
+				startInput.name = "societyEditStart";
+				startInput.value = societyEditState.start;
+				startInput.placeholder = "Start";
+				startInput.addEventListener("input", (event) => {
+					updateSocietyEditState("start", event.target.value);
+					setRangeDisplay(societyEditState.start, societyEditState.end);
+					if (societyEditState.error) {
+						societyEditState.error = "";
+						error.textContent = "";
+					}
+				});
+				const endInput = document.createElement("input");
+				endInput.type = "number";
+				endInput.name = "societyEditEnd";
+				endInput.value = societyEditState.end;
+				endInput.placeholder = "End";
+				endInput.addEventListener("input", (event) => {
+					updateSocietyEditState("end", event.target.value);
+					setRangeDisplay(societyEditState.start, societyEditState.end);
+					if (societyEditState.error) {
+						societyEditState.error = "";
+						error.textContent = "";
+					}
+				});
+				fields.appendChild(nameInput);
+				fields.appendChild(startInput);
+				fields.appendChild(endInput);
+				editBlock.appendChild(fields);
+				editBlock.appendChild(error);
+				const editActions = document.createElement("div");
+				editActions.className = "society-edit-actions";
+				const saveBtn = document.createElement("button");
+				saveBtn.type = "button";
+				saveBtn.textContent = "Save";
+				saveBtn.addEventListener("click", () => handleSocietyEditSave(group.id));
+				const cancelBtn = document.createElement("button");
+				cancelBtn.type = "button";
+				cancelBtn.className = "secondary";
+				cancelBtn.textContent = "Cancel";
+				cancelBtn.addEventListener("click", cancelSocietyEdit);
+				editActions.appendChild(saveBtn);
+				editActions.appendChild(cancelBtn);
+				editBlock.appendChild(editActions);
+				item.appendChild(editBlock);
+			}
 			els.societyList.appendChild(item);
 		}
 		refreshExportSocietyOptions();
@@ -1099,6 +1291,29 @@
 		return summary;
 	}
 
+	function computeRowStats(rows) {
+		const totals = {
+			distributed: 0,
+			takenBack: 0,
+			haveForm: 0
+		};
+		if (!Array.isArray(rows)) {
+			return totals;
+		}
+		for (const row of rows) {
+			if (!row || typeof row !== "object") continue;
+			if (row.distributed) totals.distributed += 1;
+			if (row.takenBack) totals.takenBack += 1;
+			if (row.haveForm) totals.haveForm += 1;
+		}
+		return totals;
+	}
+
+	function formatRowStatsLine(stats) {
+		const totals = stats || { distributed: 0, takenBack: 0, haveForm: 0 };
+		return `Distributed: ${totals.distributed}  •  Collected: ${totals.takenBack}  •  I Have: ${totals.haveForm}`;
+	}
+
 	function renderList(n) {
 		renderSocietyManager();
 		els.list.textContent = "";
@@ -1123,7 +1338,8 @@
 		const fragment = document.createDocumentFragment();
 		const hasNamedGroups = groups.length > 0;
 		const buildGroupSection = (group, numbers, isUngrouped = false) => {
-			if (numbers.length === 0) return;
+			const hasRows = numbers.length > 0;
+			if (!hasRows && isUngrouped) return;
 			const details = document.createElement("details");
 			details.className = "society";
 			const groupId = isUngrouped ? "ungrouped" : group.id;
@@ -1146,6 +1362,13 @@
 			const renderRowsIntoBody = () => {
 				// Avoid re-rendering if already populated
 				if (body.childElementCount > 0) return;
+				if (!hasRows) {
+					const emptyMessage = document.createElement("p");
+					emptyMessage.className = "society-empty";
+					emptyMessage.textContent = "No forms currently fall within this range.";
+					body.appendChild(emptyMessage);
+					return;
+				}
 				const rowsFragment = document.createDocumentFragment();
 				for (const num of numbers) {
 					rowsFragment.appendChild(buildRow(num));
@@ -1255,6 +1478,7 @@
 			showImportExportMessage("No forms match the selected filters.", "warn");
 			return;
 		}
+		const overallStats = computeRowStats(snapshot.rows);
 		const { jsPDF } = window.jspdf;
 		const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
 		const marginLeft = 40;
@@ -1268,37 +1492,51 @@
 		doc.setFontSize(18);
 		doc.text("BLO Forms Report", marginLeft, titleY);
 		doc.setFontSize(12);
+		doc.setTextColor(0, 0, 0);
 		const infoStart = titleY + 20;
-		doc.text(`Generated: ${formatReadableDateTime()}`, marginLeft, infoStart);
-		doc.text(`Total Forms: ${snapshot.count}`, marginLeft, infoStart + 18);
+		let infoY = infoStart;
+		const infoLines = [
+			`Generated: ${formatReadableDateTime()}`,
+			`Total Forms: ${snapshot.count}`
+		];
 		if (snapshot.groups.length > 0) {
-			doc.text(`Societies: ${snapshot.groups.length}`, marginLeft, infoStart + 36);
+			infoLines.push(`Societies: ${snapshot.groups.length}`);
+		}
+		infoLines.push(formatRowStatsLine(overallStats));
+		for (const line of infoLines) {
+			doc.text(line, marginLeft, infoY);
+			infoY += 18;
 		}
 		if (typeof doc.autoTable !== "function") {
 			showImportExportMessage("PDF table helper not available. Please reload and try again.", "error");
 			return;
 		}
+		const toSection = (title, rows) => ({
+			title,
+			rows,
+			stats: computeRowStats(rows)
+		});
 		const sections = [];
 		for (const entry of snapshot.groupedRows) {
 			if (!entry || !entry.group || entry.rows.length === 0) continue;
 			const countLabel = `${entry.rows.length} form${entry.rows.length === 1 ? "" : "s"}`;
 			const title = `${entry.group.name} (${entry.group.start}–${entry.group.end}) • ${countLabel}`;
-			sections.push({ title, rows: entry.rows });
+			sections.push(toSection(title, entry.rows));
 		}
 		if (snapshot.groups.length > 0) {
 			if (snapshot.ungroupedRows.length > 0) {
 				const countLabel = `${snapshot.ungroupedRows.length} form${snapshot.ungroupedRows.length === 1 ? "" : "s"}`;
-				sections.push({ title: `Ungrouped forms • ${countLabel}`, rows: snapshot.ungroupedRows });
+				sections.push(toSection(`Ungrouped forms • ${countLabel}`, snapshot.ungroupedRows));
 			}
 		} else {
 			const countLabel = `${snapshot.count} form${snapshot.count === 1 ? "" : "s"}`;
-			sections.push({ title: `All forms • ${countLabel}`, rows: snapshot.rows });
+			sections.push(toSection(`All forms • ${countLabel}`, snapshot.rows));
 		}
-		let currentY = infoStart + (snapshot.groups.length > 0 ? 72 : 54);
+		let currentY = infoY + 12;
 		const pageHeight = doc.internal.pageSize.getHeight();
 		for (const section of sections) {
 			if (!section.rows || section.rows.length === 0) continue;
-			if (currentY > pageHeight - 80) {
+			if (currentY > pageHeight - 120) {
 				doc.addPage();
 				currentY = 60;
 			}
@@ -1306,6 +1544,13 @@
 			doc.setTextColor(34, 34, 34);
 			doc.text(section.title, marginLeft, currentY);
 			currentY += 16;
+			const statsLine = formatRowStatsLine(section.stats);
+			doc.setFontSize(11);
+			doc.setTextColor(71, 85, 105);
+			doc.text(statsLine, marginLeft, currentY);
+			currentY += 14;
+			doc.setFontSize(10);
+			doc.setTextColor(0, 0, 0);
 			const body = section.rows.map((row) => {
 				const summaryBlocks = buildRowSummary(row);
 				const arr = [
@@ -1355,7 +1600,8 @@
 					}
 				}
 			});
-			currentY = (doc.lastAutoTable && doc.lastAutoTable.finalY ? doc.lastAutoTable.finalY : currentY) + 18;
+			const tableFinalY = doc.lastAutoTable && doc.lastAutoTable.finalY ? doc.lastAutoTable.finalY : currentY;
+			currentY = tableFinalY + 18;
 			doc.setFontSize(12);
 			doc.setTextColor(0, 0, 0);
 		}
