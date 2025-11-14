@@ -11,31 +11,33 @@
 	<link rel="stylesheet" href="styles.css?v=9" />
 </head>
 <body>
-	<header class="app-header">
-		<h1>BLO Forms Tracker</h1>
-		<div class="header-actions">
-			<button id="settingsBtn" class="secondary" title="Settings" aria-label="Settings">⚙️</button>
-			<button id="themeToggle" class="secondary" title="Switch theme" aria-label="Switch theme">🌙</button>
-		</div>
-	</header>
-
-	<section id="searchPanel" class="global-search" aria-label="Search forms">
-		<div class="search-inner">
-			<label class="sr-only" for="searchInput">Search by form number or name</label>
-			<div class="search-row">
-				<input id="searchInput" type="search" placeholder="Search by form # or name" autocomplete="off" />
-				<button id="searchSubmit" type="button">Search</button>
+	<div class="top-shell">
+		<header class="app-header">
+			<h1>BLO Forms Tracker</h1>
+			<div class="header-actions">
+				<button id="settingsBtn" class="secondary" title="Settings" aria-label="Settings">⚙️</button>
+				<button id="themeToggle" class="secondary" title="Switch theme" aria-label="Switch theme">🌙</button>
 			</div>
-			<div class="search-meta">
-				<span id="searchStatus" class="search-status" role="status" aria-live="polite"></span>
-				<div class="search-nav">
-					<button id="searchPrev" type="button" class="secondary hidden">Previous</button>
-					<button id="searchNext" type="button" class="secondary hidden">Next</button>
-					<button id="searchDone" type="button" class="secondary hidden">Done</button>
+		</header>
+
+		<section id="searchPanel" class="global-search" aria-label="Search forms">
+			<div class="search-inner">
+				<label class="sr-only" for="searchInput">Search by form number or name</label>
+				<div class="search-row">
+					<input id="searchInput" type="search" placeholder="Search by form #, name, phone, EPIC" autocomplete="off" />
+					<button id="searchSubmit" type="button">Search</button>
+				</div>
+				<div class="search-meta">
+					<span id="searchStatus" class="search-status" role="status" aria-live="polite"></span>
+					<div class="search-nav">
+						<button id="searchPrev" type="button" class="secondary hidden">Previous</button>
+						<button id="searchNext" type="button" class="secondary hidden">Next</button>
+						<button id="searchDone" type="button" class="secondary hidden">Done</button>
+					</div>
 				</div>
 			</div>
-		</div>
-	</section>
+		</section>
+	</div>
 
 	<main class="container">
 		<section class="controls">

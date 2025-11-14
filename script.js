@@ -18,6 +18,7 @@
 		settingsModal: document.getElementById("settingsModal"),
 		settingsClose: document.getElementById("settingsClose"),
 		themeToggle: document.getElementById("themeToggle"),
+		topShell: document.querySelector(".top-shell"),
 		searchPanel: document.getElementById("searchPanel"),
 		searchInput: document.getElementById("searchInput"),
 		searchSubmit: document.getElementById("searchSubmit"),
@@ -1714,9 +1715,13 @@
 		searchHeightRaf = requestAnimationFrame(() => {
 			searchHeightRaf = null;
 			if (!els.searchPanel) return;
-			const height = els.searchPanel.offsetHeight || 0;
-			if (height > 0) {
-				document.documentElement.style.setProperty("--search-bar-height", `${height}px`);
+			const searchHeight = els.searchPanel.offsetHeight || 0;
+			const topShellHeight = els.topShell ? els.topShell.offsetHeight || 0 : searchHeight;
+			document.documentElement.style.setProperty("--search-bar-height", `${searchHeight}px`);
+			document.documentElement.style.setProperty("--top-shell-height", `${topShellHeight}px`);
+			document.documentElement.style.setProperty("--sticky-offset", `${topShellHeight}px`);
+			if (document.body) {
+				document.body.style.paddingTop = `${topShellHeight}px`;
 			}
 		});
 	}
@@ -1763,7 +1768,15 @@
 		if (!Number.isFinite(formNumber)) return null;
 		const selector = `.row[data-form-id="${formNumber}"]`;
 		let row = els.list.querySelector(selector);
-		if (row) return row;
+		if (row) {
+			const container = row.closest(".society");
+			if (container && !container.open) {
+				container.open = true;
+				await waitForFrame();
+				queueSearchBarHeightSync();
+			}
+			return row;
+		}
 		const groups = getGroupsSorted();
 		const group = findGroupForForm(formNumber, groups);
 		const targetGroupId = (group ? group.id : "ungrouped") || "ungrouped";
@@ -1778,6 +1791,7 @@
 		if (!details) return null;
 		if (!details.open) {
 			details.open = true;
+			queueSearchBarHeightSync();
 		}
 		await waitForFrame();
 		row = els.list.querySelector(selector);
@@ -1788,6 +1802,14 @@
 			await waitForFrame();
 			row = els.list.querySelector(selector);
 		}
+		if (row) {
+			const container = row.closest(".society");
+			if (container && !container.open) {
+				container.open = true;
+				await waitForFrame();
+			}
+		}
+		queueSearchBarHeightSync();
 		return row || null;
 	}
 
@@ -1817,13 +1839,19 @@
 		}
 		row.classList.add("row-search-highlight");
 		lastSearchRow = row;
-		row.scrollIntoView({ behavior: "smooth", block: "center" });
+		const topShellHeight = els.topShell ? els.topShell.offsetHeight || 0 : 0;
+		const stickyOffset = topShellHeight + 16;
+		const targetTop = row.getBoundingClientRect().top + window.scrollY - stickyOffset;
+		window.scrollTo({
+			top: targetTop < 0 ? 0 : targetTop,
+			behavior: "smooth"
+		});
 		setSearchStatus(
 			formatSearchStatus(index, searchState.matches.length, formNumber, searchState.query, searchState.mode)
 		);
 	}
 
-	function collectNameMatches(query) {
+	function collectFieldMatches(query) {
 		const normalized = query.trim().toLowerCase();
 		const count = getSavedCount();
 		if (!normalized || !Number.isFinite(count) || count <= 0) {
@@ -1833,7 +1861,10 @@
 		for (let formNumber = 1; formNumber <= count; formNumber++) {
 			const state = getRowState(formNumber);
 			if (state.deleted || state.missing) continue;
-			if (state.name && state.name.toLowerCase().includes(normalized)) {
+			const nameMatches = state.name && state.name.toLowerCase().includes(normalized);
+			const phoneMatches = state.phone && state.phone.toLowerCase().includes(normalized);
+			const epicMatches = state.epic && state.epic.toLowerCase().includes(normalized);
+			if (nameMatches || phoneMatches || epicMatches) {
 				matches.push(formNumber);
 			}
 		}
@@ -1859,17 +1890,19 @@
 			clearSearchHighlight();
 			return;
 		}
-		let matches = [];
-		let mode = "name";
+		const matchesSet = new Set();
+		let mode = "text";
 		if (/^\d+$/.test(query)) {
 			mode = "number";
 			const numberMatch = Number.parseInt(query, 10);
 			if (Number.isFinite(numberMatch) && numberMatch >= 1 && numberMatch <= count) {
-				matches = [numberMatch];
+				matchesSet.add(numberMatch);
 			}
-		} else {
-			matches = collectNameMatches(query);
 		}
+		for (const formNumber of collectFieldMatches(query)) {
+			matchesSet.add(formNumber);
+		}
+		const matches = Array.from(matchesSet).sort((a, b) => a - b);
 		if (!matches.length) {
 			setSearchStatus(`No matches for "${query}".`);
 			searchState = null;
@@ -2697,6 +2730,9 @@
 		});
 	}
 	window.addEventListener("resize", queueSearchBarHeightSync);
+	window.addEventListener("scroll", () => {
+		queueSearchBarHeightSync();
+	});
 	queueSearchBarHeightSync();
 	updateSearchNavigation();
 	window.addEventListener("beforeinstallprompt", (event) => {
