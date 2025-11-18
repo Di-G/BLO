@@ -31,6 +31,14 @@
 		warning: document.getElementById("warning"),
 		listHeader: document.getElementById("listHeader"),
 		list: document.getElementById("list"),
+		analysisPanel: document.getElementById("analysisPanel"),
+		formStats: document.getElementById("formStats"),
+		statsDistributed: document.getElementById("statsDistributed"),
+		statsCollected: document.getElementById("statsCollected"),
+		statsHave: document.getElementById("statsHave"),
+		statsMissing: document.getElementById("statsMissing"),
+		statsDeleted: document.getElementById("statsDeleted"),
+		statsNoEntry: document.getElementById("statsNoEntry"),
 		hdrStatus1: document.getElementById("hdrStatus1"),
 		hdrStatus2: document.getElementById("hdrStatus2"),
 		societyName: document.getElementById("societyName"),
@@ -81,6 +89,9 @@
 	let lastSearchRow = null;
 	const groupRenderers = new Map();
 	let searchHeightRaf = null;
+	let statsUpdateScheduled = false;
+	let groupStatsUpdateScheduled = false;
+	const pendingGroupStatUpdates = new Set();
 
 	function isAppMarkedInstalled() {
 		return localStorage.getItem(storageInstalledKey) === "1";
@@ -1166,17 +1177,25 @@
 			};
 
 			const handleSubmit = () => {
+				const currentValue = getCurrentValue();
+				const hadValue = Boolean(currentValue);
 				const nextValue = input.value.trim();
 				if (!nextValue) {
 					saved[fieldKey] = "";
 					saveRowState(id, saved);
 					refresh();
+					if (hadValue) {
+						scheduleFormStatsUpdate();
+					}
 					return;
 				}
 				saved[fieldKey] = nextValue;
 				valueSpan.textContent = nextValue;
 				saveRowState(id, saved);
 				setMode("display");
+				if (!hadValue) {
+					scheduleFormStatsUpdate();
+				}
 			};
 
 			const handleCancel = () => {
@@ -1372,15 +1391,20 @@
 			commentToggle.textContent = "Comment";
 		};
 		const updateCommentVisibility = (visible, { persist = true, focus = false } = {}) => {
-			saved.showComments = visible;
-			commentsCol.classList.toggle("comment-inline--collapsed", !visible);
-			commentToggle.setAttribute("aria-pressed", visible ? "true" : "false");
+			const previous = Boolean(saved.showComments);
+			const nextVisible = Boolean(visible);
+			saved.showComments = nextVisible;
+			commentsCol.classList.toggle("comment-inline--collapsed", !nextVisible);
+			commentToggle.setAttribute("aria-pressed", nextVisible ? "true" : "false");
 			refreshCommentToggleLabel();
-			if (visible && focus) {
+			if (nextVisible && focus) {
 				requestAnimationFrame(focusCommentInput);
 			}
 			if (persist) {
 				saveRowState(id, saved);
+				if (previous !== nextVisible) {
+					scheduleFormStatsUpdate();
+				}
 			}
 		};
 		const highlightComment = ({ focus = false } = {}) => {
@@ -1492,6 +1516,8 @@
 			syncDistributedMetaVisibility();
 			applyIgnoredState();
 			saveRowState(id, saved);
+			scheduleFormStatsUpdate();
+			scheduleGroupStatsUpdate(id);
 			recalcHeaderStatusVisibility();
 		};
 
@@ -1520,6 +1546,8 @@
 				syncDistributedMetaVisibility();
 				refreshRowVisuals();
 				saveRowState(id, saved);
+				scheduleFormStatsUpdate();
+				scheduleGroupStatsUpdate(id);
 				recalcHeaderStatusVisibility();
 				return;
 			}
@@ -1539,6 +1567,8 @@
 			syncDistributedMetaVisibility();
 			refreshRowVisuals();
 			saveRowState(id, saved);
+			scheduleFormStatsUpdate();
+			scheduleGroupStatsUpdate(id);
 		});
 
 		btnHave.addEventListener("click", async () => {
@@ -1588,6 +1618,8 @@
 			}
 			syncDistributedMetaVisibility();
 			saveRowState(id, saved);
+			scheduleFormStatsUpdate();
+			scheduleGroupStatsUpdate(id);
 			recalcHeaderStatusVisibility();
 		});
 
@@ -1614,6 +1646,8 @@
 			btnBack.className = next ? "btn-back" : "btn-muted";
 			refreshRowVisuals();
 			saveRowState(id, saved);
+			scheduleFormStatsUpdate();
+			scheduleGroupStatsUpdate(id);
 		});
 
 		btnMissed.addEventListener("click", async () => {
@@ -1656,6 +1690,8 @@
 			refreshRowVisuals();
 			saveRowState(id, saved);
 			recalcHeaderStatusVisibility();
+			scheduleFormStatsUpdate();
+			scheduleGroupStatsUpdate(id);
 		});
 
 		distributedSelect.addEventListener("change", () => {
@@ -1670,12 +1706,22 @@
 		});
 
 		select1.addEventListener("change", () => {
+			const hadStatus = Boolean(saved.status1 && saved.status1.trim());
 			saved.status1 = select1.value;
+			const hasStatus = Boolean(saved.status1 && saved.status1.trim());
 			saveRowState(id, saved);
+			if (hadStatus !== hasStatus) {
+				scheduleFormStatsUpdate();
+			}
 		});
 		select2.addEventListener("change", () => {
+			const hadStatus = Boolean(saved.status2 && saved.status2.trim());
 			saved.status2 = select2.value;
+			const hasStatus = Boolean(saved.status2 && saved.status2.trim());
 			saveRowState(id, saved);
+			if (hadStatus !== hasStatus) {
+				scheduleFormStatsUpdate();
+			}
 		});
 		addSecondBtn.addEventListener("click", () => {
 			saved.showSecondStatus = true;
@@ -1684,12 +1730,18 @@
 			saveRowState(id, saved);
 			select2.focus();
 			recalcHeaderStatusVisibility();
+			scheduleFormStatsUpdate();
 		});
 		textarea.addEventListener("input", () => {
+			const hadComment = Boolean(saved.comments && saved.comments.trim());
 			saved.comments = textarea.value;
+			const hasComment = Boolean(saved.comments && saved.comments.trim());
 			const isVisible = !commentsCol.classList.contains("comment-inline--collapsed");
 			refreshCommentToggleLabel(isVisible);
 			saveRowState(id, saved);
+			if (hadComment !== hasComment) {
+				scheduleFormStatsUpdate();
+			}
 		});
 
 		applyIgnoredState();
@@ -2009,6 +2061,183 @@
 		return totals;
 	}
 
+	function computeGroupStats(formNumbers) {
+		const stats = {
+			distributed: 0,
+			have: 0,
+			collected: 0
+		};
+		if (!Array.isArray(formNumbers)) {
+			return stats;
+		}
+		for (const formNumber of formNumbers) {
+			if (!Number.isFinite(formNumber)) continue;
+			const state = getRowState(formNumber);
+			if (!state || typeof state !== "object") continue;
+			if (state.deleted || state.missing) continue;
+			if (state.distributed) stats.distributed += 1;
+			if (state.haveForm) stats.have += 1;
+			if (state.takenBack) stats.collected += 1;
+		}
+		return stats;
+	}
+
+	function computeFormStatsTotals() {
+		const savedCount = getSavedCount();
+		const total = Number.isFinite(savedCount) && savedCount > 0 ? savedCount : 0;
+		const stats = {
+			total,
+			distributed: 0,
+			collected: 0,
+			have: 0,
+			missing: 0,
+			deleted: 0,
+			noEntry: 0
+		};
+		if (total === 0) {
+			return stats;
+		}
+		for (let id = 1; id <= total; id++) {
+			const state = getRowState(id);
+			if (!state || typeof state !== "object") continue;
+			const isDeleted = Boolean(state.deleted);
+			const isMissing = Boolean(state.missing);
+			if (isDeleted) stats.deleted += 1;
+			if (isMissing) stats.missing += 1;
+			if (isDeleted || isMissing) continue;
+			if (state.distributed) stats.distributed += 1;
+			if (state.takenBack) stats.collected += 1;
+			if (state.haveForm) stats.have += 1;
+			const hasPrimaryAction =
+				state.distributed || state.takenBack || state.haveForm || state.missedForm;
+			const hasDetails =
+				Boolean(state.status1 && state.status1.trim()) ||
+				Boolean(state.status2 && state.status2.trim()) ||
+				Boolean(state.comments && state.comments.trim()) ||
+				Boolean(state.name && state.name.trim()) ||
+				Boolean(state.phone && state.phone.trim()) ||
+				Boolean(state.epic && state.epic.trim()) ||
+				Boolean(state.showSecondStatus) ||
+				Boolean(state.showComments);
+			if (!hasPrimaryAction && !hasDetails) {
+				stats.noEntry += 1;
+			}
+		}
+		return stats;
+	}
+
+	function updateFormStats() {
+		if (!els.formStats) return;
+		const stats = computeFormStatsTotals();
+		if (els.statsDistributed) {
+			els.statsDistributed.textContent = String(stats.distributed);
+		}
+		if (els.statsCollected) {
+			els.statsCollected.textContent = String(stats.collected);
+		}
+		if (els.statsHave) {
+			els.statsHave.textContent = String(stats.have);
+		}
+		if (els.statsMissing) {
+			els.statsMissing.textContent = String(stats.missing);
+		}
+		if (els.statsDeleted) {
+			els.statsDeleted.textContent = String(stats.deleted);
+		}
+		if (els.statsNoEntry) {
+			els.statsNoEntry.textContent = String(stats.noEntry);
+		}
+		els.formStats.setAttribute("data-total-forms", String(stats.total));
+	}
+
+	function scheduleFormStatsUpdate() {
+		if (statsUpdateScheduled) return;
+		statsUpdateScheduled = true;
+		const hasWindow = typeof window !== "undefined";
+		const raf =
+			hasWindow && typeof window.requestAnimationFrame === "function"
+				? window.requestAnimationFrame.bind(window)
+				: null;
+		const runner =
+			raf ||
+			((callback) => {
+				if (hasWindow && typeof window.setTimeout === "function") {
+					window.setTimeout(callback, 16);
+				} else if (typeof setTimeout === "function") {
+					setTimeout(callback, 16);
+				} else {
+					callback();
+				}
+			});
+		runner(() => {
+			statsUpdateScheduled = false;
+			updateFormStats();
+		});
+	}
+
+	function refreshGroupStats(groupId) {
+		if (!groupId) return;
+		const entry = groupRenderers.get(groupId);
+		if (!entry) return;
+		const numbers = Array.isArray(entry.numbers) ? entry.numbers : [];
+		const stats = computeGroupStats(numbers);
+		if (entry.statValues && typeof entry.statValues === "object") {
+			const entries = [
+				["distributed", stats.distributed],
+				["have", stats.have],
+				["collected", stats.collected]
+			];
+			for (const [key, value] of entries) {
+				const statInfo = entry.statValues[key];
+				if (!statInfo) continue;
+				if (statInfo.valueEl) {
+					statInfo.valueEl.textContent = String(value);
+				}
+				if (statInfo.root) {
+					statInfo.root.setAttribute("title", `${statInfo.label}: ${value}`);
+				}
+			}
+		}
+	}
+
+	function scheduleGroupStatsUpdate(formNumber) {
+		if (!Number.isFinite(formNumber)) return;
+		const total = getSavedCount();
+		if (!Number.isFinite(total) || total <= 0) return;
+		if (formNumber < 1 || formNumber > total) return;
+		const groups = getGroupsSorted();
+		const group = findGroupForForm(formNumber, groups);
+		const groupId = (group ? group.id : "ungrouped") || "ungrouped";
+		pendingGroupStatUpdates.add(groupId);
+		if (!groupStatsUpdateScheduled) {
+			groupStatsUpdateScheduled = true;
+			const hasWindow = typeof window !== "undefined";
+			const raf =
+				hasWindow && typeof window.requestAnimationFrame === "function"
+					? window.requestAnimationFrame.bind(window)
+					: null;
+			const runner =
+				raf ||
+				((callback) => {
+					if (hasWindow && typeof window.setTimeout === "function") {
+						window.setTimeout(callback, 16);
+					} else if (typeof setTimeout === "function") {
+						setTimeout(callback, 16);
+					} else {
+						callback();
+					}
+				});
+			runner(() => {
+				groupStatsUpdateScheduled = false;
+				const pending = Array.from(pendingGroupStatUpdates);
+				pendingGroupStatUpdates.clear();
+				for (const id of pending) {
+					refreshGroupStats(id);
+				}
+			});
+		}
+	}
+
 	function formatRowStatsLine(stats) {
 		const totals = stats || { distributed: 0, takenBack: 0, haveForm: 0, missed: 0 };
 		return `Distributed: ${totals.distributed}  •  Not Returned: ${totals.missed}  •  Collected: ${totals.takenBack}  •  I Have: ${totals.haveForm}`;
@@ -2016,6 +2245,7 @@
 
 	function renderList(n) {
 		renderSocietyManager();
+		updateFormStats();
 		els.list.textContent = "";
 		if (!Number.isFinite(n) || n <= 0) {
 			els.listHeader.classList.add("hidden");
@@ -2062,15 +2292,49 @@
 				details.open = true;
 			}
 			const summary = document.createElement("summary");
-			const summaryText = document.createElement("span");
-			summaryText.textContent = isUngrouped
+			summary.className = "society-summary";
+			const summaryMain = document.createElement("div");
+			summaryMain.className = "society-summary-main";
+			const nameSpan = document.createElement("span");
+			nameSpan.className = "society-summary-name";
+			nameSpan.textContent = isUngrouped
 				? hasNamedGroups ? "Ungrouped forms" : "All forms"
 				: `${group.name} (${group.start}–${group.end})`;
 			const countSpan = document.createElement("span");
 			countSpan.className = "society-summary-count";
 			countSpan.textContent = `${numbers.length} form${numbers.length === 1 ? "" : "s"}`;
-			summary.appendChild(summaryText);
-			summary.appendChild(countSpan);
+			summaryMain.appendChild(nameSpan);
+			summaryMain.appendChild(countSpan);
+			const statsWrap = document.createElement("div");
+			statsWrap.className = "society-summary-stats";
+			const statValues = {};
+			const createSummaryStat = (variant, value, label) => {
+				const stat = document.createElement("span");
+				stat.className = "society-summary-stat";
+				stat.title = `${label}: ${value}`;
+				const srLabel = document.createElement("span");
+				srLabel.className = "sr-only";
+				srLabel.textContent = `${label}: `;
+				const dot = document.createElement("span");
+				dot.className = `society-summary-dot society-summary-dot--${variant}`;
+				dot.setAttribute("aria-hidden", "true");
+				const valueSpan = document.createElement("span");
+				valueSpan.className = "society-summary-stat-count";
+				valueSpan.textContent = String(value);
+				stat.append(srLabel, dot, valueSpan);
+				statsWrap.appendChild(stat);
+				statValues[variant] = {
+					valueEl: valueSpan,
+					root: stat,
+					label
+				};
+			};
+			const initialStats = computeGroupStats(numbers);
+			createSummaryStat("distributed", initialStats.distributed, "Distributed forms");
+			createSummaryStat("have", initialStats.have, "I have forms");
+			createSummaryStat("collected", initialStats.collected, "Collected forms");
+			summary.appendChild(summaryMain);
+			summary.appendChild(statsWrap);
 			details.appendChild(summary);
 			const body = document.createElement("div");
 			body.className = "society-body";
@@ -2098,7 +2362,10 @@
 			groupRenderers.set(groupId, {
 				render: renderRowsIntoBody,
 				body,
-				details
+				details,
+				summary,
+				statValues,
+				numbers: numbers.slice()
 			});
 			details.addEventListener("toggle", () => {
 				setGroupOpenState(groupId, details.open);
@@ -2150,6 +2417,7 @@
 		showWarning("All data cleared.");
 		showSettingsMessage("All data cleared. Enter a new number to start again.", "warn");
 		renderSocietyManager();
+		updateFormStats();
 	}
 
 	// Settings modal
@@ -2729,6 +2997,11 @@
 			completeSearchSession();
 		});
 	}
+	if (els.analysisPanel) {
+		els.analysisPanel.addEventListener("toggle", () => {
+			queueSearchBarHeightSync();
+		});
+	}
 	window.addEventListener("resize", queueSearchBarHeightSync);
 	window.addEventListener("scroll", () => {
 		queueSearchBarHeightSync();
@@ -2773,6 +3046,8 @@
 	setFirstRunMode(!savedCount);
 	if (savedCount) {
 		renderList(savedCount);
+	} else {
+		updateFormStats();
 	}
 
 	const isAlreadyInstalled =

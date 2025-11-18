@@ -19,6 +19,38 @@
 				<button id="themeToggle" class="secondary" title="Switch theme" aria-label="Switch theme">🌙</button>
 			</div>
 		</header>
+		<details id="analysisPanel" class="analysis-panel" open>
+			<summary class="analysis-summary">
+				<span class="analysis-summary__label">Analysis</span>
+				<span class="analysis-summary__indicator" aria-hidden="true"></span>
+			</summary>
+			<div id="formStats" class="form-stats" aria-live="polite">
+				<div class="form-stats__item">
+					<span class="form-stats__label">Distributed</span>
+					<span class="form-stats__value" id="statsDistributed">0</span>
+				</div>
+				<div class="form-stats__item">
+					<span class="form-stats__label">Collected</span>
+					<span class="form-stats__value" id="statsCollected">0</span>
+				</div>
+				<div class="form-stats__item">
+					<span class="form-stats__label">I Have</span>
+					<span class="form-stats__value" id="statsHave">0</span>
+				</div>
+				<div class="form-stats__item">
+					<span class="form-stats__label">Form Missing</span>
+					<span class="form-stats__value" id="statsMissing">0</span>
+				</div>
+				<div class="form-stats__item">
+					<span class="form-stats__label">Deleted</span>
+					<span class="form-stats__value" id="statsDeleted">0</span>
+				</div>
+				<div class="form-stats__item">
+					<span class="form-stats__label">No Entry</span>
+					<span class="form-stats__value" id="statsNoEntry">0</span>
+				</div>
+			</div>
+		</details>
 
 		<section id="searchPanel" class="global-search" aria-label="Search forms">
 			<div class="search-inner">
