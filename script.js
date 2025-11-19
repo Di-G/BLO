@@ -1,6 +1,52 @@
 (() => {
 	const MAX_FORMS = 10000;
 	const ASSET_VERSION = "11";
+	const DATA_EXPORT_VERSION = 2;
+	const ROW_STATE_EXPORT_KEYS = [
+		"distributed",
+		"takenBack",
+		"haveForm",
+		"missedForm",
+		"distributionType",
+		"showSecondStatus",
+		"status1",
+		"status2",
+		"comments",
+		"showComments",
+		"deleted",
+		"missing",
+		"name",
+		"phone",
+		"epic"
+	];
+	const FORM_EXPORT_HEADERS = [
+		"FormNumber",
+		"GroupId",
+		"GroupName",
+		"GroupRangeStart",
+		"GroupRangeEnd",
+		"Name",
+		"PhoneNumber",
+		"EpicNumber",
+		"Distributed",
+		"DistributionType",
+		"Collected",
+		"TakenBack",
+		"HaveForm",
+		"MissedForm",
+		"NotReturned",
+		"Deleted",
+		"FormMissing",
+		"ShowSecondStatus",
+		"Status1",
+		"Status2",
+		"ShowComments",
+		"Comments",
+		"NoEntry",
+		"ColorHex",
+		"RawStateJson"
+	];
+	const GROUP_EXPORT_HEADERS = ["Id", "Name", "Start", "End"];
 	const STATUS_OPTIONS = [
 		"",
 		"Shifted",
@@ -947,6 +993,46 @@
 		const b = Number.parseInt(normalized.slice(4, 6), 16);
 		if ([r, g, b].some((value) => Number.isNaN(value))) return null;
 		return [r, g, b];
+	}
+
+	function formatBooleanForExcel(value) {
+		return value ? "Yes" : "No";
+	}
+
+	function safeStringForExcel(value) {
+		return value == null ? "" : String(value);
+	}
+
+	function firstPopulatedValue(...values) {
+		for (const value of values) {
+			if (value === undefined || value === null) continue;
+			if (typeof value === "string" && value.trim() === "") continue;
+			return value;
+		}
+		return undefined;
+	}
+
+	function buildRowStateExportPayload(row) {
+		const payload = {};
+		if (!row || typeof row !== "object") {
+			for (const key of ROW_STATE_EXPORT_KEYS) {
+				payload[key] = null;
+			}
+			return payload;
+		}
+		for (const key of ROW_STATE_EXPORT_KEYS) {
+			payload[key] = row[key] ?? null;
+		}
+		return payload;
+	}
+
+	function stringifyRowStateForExport(row) {
+		try {
+			const payload = buildRowStateExportPayload(row);
+			return JSON.stringify(payload);
+		} catch {
+			return "";
+		}
 	}
 
 	function getDataSnapshot() {
@@ -2083,6 +2169,25 @@
 		return stats;
 	}
 
+	function isRowConsideredNoEntry(state) {
+		if (!state || typeof state !== "object") return true;
+		const hasPrimaryAction =
+			Boolean(state.distributed) ||
+			Boolean(state.takenBack) ||
+			Boolean(state.haveForm) ||
+			Boolean(state.missedForm);
+		const hasDetails =
+			Boolean(state.status1 && state.status1.trim()) ||
+			Boolean(state.status2 && state.status2.trim()) ||
+			Boolean(state.comments && state.comments.trim()) ||
+			Boolean(state.name && state.name.trim()) ||
+			Boolean(state.phone && state.phone.trim()) ||
+			Boolean(state.epic && state.epic.trim()) ||
+			Boolean(state.showSecondStatus) ||
+			Boolean(state.showComments);
+		return !hasPrimaryAction && !hasDetails;
+	}
+
 	function computeFormStatsTotals() {
 		const savedCount = getSavedCount();
 		const total = Number.isFinite(savedCount) && savedCount > 0 ? savedCount : 0;
@@ -2109,18 +2214,7 @@
 			if (state.distributed) stats.distributed += 1;
 			if (state.takenBack) stats.collected += 1;
 			if (state.haveForm) stats.have += 1;
-			const hasPrimaryAction =
-				state.distributed || state.takenBack || state.haveForm || state.missedForm;
-			const hasDetails =
-				Boolean(state.status1 && state.status1.trim()) ||
-				Boolean(state.status2 && state.status2.trim()) ||
-				Boolean(state.comments && state.comments.trim()) ||
-				Boolean(state.name && state.name.trim()) ||
-				Boolean(state.phone && state.phone.trim()) ||
-				Boolean(state.epic && state.epic.trim()) ||
-				Boolean(state.showSecondStatus) ||
-				Boolean(state.showComments);
-			if (!hasPrimaryAction && !hasDetails) {
+			if (isRowConsideredNoEntry(state)) {
 				stats.noEntry += 1;
 			}
 		}
@@ -2619,60 +2713,69 @@
 			return;
 		}
 		const workbook = XLSX.utils.book_new();
-		const formsSheetData = [
-			[
-				"FormNumber",
-				"GroupName",
-				"Name",
-				"PhoneNumber",
-				"EpicNumber",
-				"Distributed",
-				"TakenBack",
-				"NotReturned",
-				"Deleted",
-				"FormMissing",
-				"HaveForm",
-				"DistributionType",
-				"Status1",
-				"Status2",
-				"Comments",
-				"ShowSecondStatus",
-				"ShowComments"
-			]
-		];
+		const groupLookup = new Map(
+			Array.isArray(snapshot.groups) ? snapshot.groups.map((group) => [group.id, group]) : []
+		);
+		const formsSheetData = [FORM_EXPORT_HEADERS.slice()];
 		for (const row of snapshot.rows) {
+			const group = row && row.groupId ? groupLookup.get(row.groupId) : null;
+			const isDeleted = Boolean(row && row.deleted);
+			const isMissing = Boolean(row && row.missing);
+			const noEntry = !isDeleted && !isMissing && isRowConsideredNoEntry(row);
+			const distributionLabel =
+				row && row.distributionType === "given"
+					? "Given to"
+					: row && row.distributionType === "self"
+					? "Self Taken"
+					: safeStringForExcel(row && row.distributionType);
+			const colorHex = row && row.colorHex ? row.colorHex : determineRowColorHex(row);
 			formsSheetData.push([
 				row.formNumber,
-				row.groupName || "",
-				row.name || "",
-				row.phone || "",
-				row.epic || "",
-				row.distributed ? "Yes" : "No",
-				row.takenBack ? "Yes" : "No",
-				row.missedForm ? "Yes" : "No",
-				row.deleted ? "Yes" : "No",
-				row.missing ? "Yes" : "No",
-				row.haveForm ? "Yes" : "No",
-				row.distributionType === "given" ? "Given to" : "Self Taken",
-				row.status1,
-				row.status2,
-				row.comments,
-				row.showSecondStatus ? "Yes" : "No",
-				row.showComments ? "Yes" : "No"
+				row.groupId || "",
+				row.groupName || (group ? group.name : ""),
+				group && Number.isFinite(group.start) ? group.start : "",
+				group && Number.isFinite(group.end) ? group.end : "",
+				safeStringForExcel(row.name),
+				safeStringForExcel(row.phone),
+				safeStringForExcel(row.epic),
+				formatBooleanForExcel(row.distributed),
+				distributionLabel,
+				formatBooleanForExcel(row.takenBack),
+				formatBooleanForExcel(row.takenBack),
+				formatBooleanForExcel(row.haveForm),
+				formatBooleanForExcel(row.missedForm),
+				formatBooleanForExcel(row.missedForm),
+				formatBooleanForExcel(row.deleted),
+				formatBooleanForExcel(row.missing),
+				formatBooleanForExcel(row.showSecondStatus),
+				safeStringForExcel(row.status1),
+				safeStringForExcel(row.status2),
+				formatBooleanForExcel(row.showComments),
+				safeStringForExcel(row.comments),
+				formatBooleanForExcel(noEntry),
+				safeStringForExcel(colorHex),
+				stringifyRowStateForExport(row)
 			]);
 		}
 		const formsSheet = XLSX.utils.aoa_to_sheet(formsSheetData);
 		XLSX.utils.book_append_sheet(workbook, formsSheet, "Forms");
 
-		const groupsSheetData = [["Name", "Start", "End"]];
+		const groupsSheetData = [GROUP_EXPORT_HEADERS.slice()];
 		for (const group of snapshot.groups) {
-			groupsSheetData.push([group.name, group.start, group.end]);
+			groupsSheetData.push([
+				group && typeof group.id === "string" ? group.id : "",
+				group ? group.name : "",
+				group ? group.start : "",
+				group ? group.end : ""
+			]);
 		}
 		const groupsSheet = XLSX.utils.aoa_to_sheet(groupsSheetData);
 		XLSX.utils.book_append_sheet(workbook, groupsSheet, "Societies");
 
 		const settingsSheetData = [
 			["Key", "Value"],
+			["dataVersion", DATA_EXPORT_VERSION],
+			["assetVersion", ASSET_VERSION],
 			["formsCount", snapshot.count],
 			["generatedAt", formatReadableDateTime()]
 		];
@@ -2718,35 +2821,108 @@
 			if (!Number.isFinite(parsedCount) || parsedCount < 1 || parsedCount > MAX_FORMS) {
 				throw new Error("Invalid forms count in file.");
 			}
+			const versionRow = settingsRows.find(
+				(entry) => coerceString(entry.key).trim().toLowerCase() === "dataversion"
+			);
+			const dataVersionValue =
+				Number.parseInt(coerceString(versionRow ? versionRow.value : "").trim(), 10) || 1;
+			const supportsRowStateJson = dataVersionValue >= 2;
 
-			const formsSheet = workbook.Sheets.Forms;
+			const formsSheet =
+				workbook.Sheets.Forms || workbook.Sheets.forms || workbook.Sheets.FORMS || null;
 			if (!formsSheet) {
 				throw new Error("Forms sheet not found in file.");
 			}
 			const formsRows = XLSX.utils.sheet_to_json(formsSheet, { defval: "" });
 			const stateMap = new Map();
 			for (const row of formsRows) {
-				const rawNumber =
-					row.FormNumber ?? row.formNumber ?? row["Form #"] ?? row["Number"] ?? row["FormNumber"];
+				const rawNumber = firstPopulatedValue(
+					row.FormNumber,
+					row.formNumber,
+					row["Form #"],
+					row.Number,
+					row["FormNumber"]
+				);
 				const formNumber = Number.parseInt(rawNumber, 10);
 				if (!Number.isFinite(formNumber) || formNumber < 1 || formNumber > parsedCount) continue;
-				const normalized = normalizeRowState({
-					distributed: row.Distributed,
-					takenBack: row.TakenBack,
-					missedForm: row.NotReturned ?? row["NotReturned"] ?? row["Not Returned"] ?? row.Missed ?? row.DidntReceiveBack ?? row.didntReceiveBack,
-					deleted: row.Deleted ?? row.deleted ?? row["IsDeleted"],
-					missing: row.FormMissing ?? row.formMissing ?? row.Missing ?? row["Form Missing"],
-					haveForm: row.HaveForm,
-					distributionType: row.DistributionType,
-					showSecondStatus: row.ShowSecondStatus,
-					status1: row.Status1,
-					status2: row.Status2,
-					comments: row.Comments,
-					showComments: row.ShowComments,
-					name: row.Name ?? row.name ?? row["FullName"] ?? row.FullName,
-					phone: row.PhoneNumber ?? row.Phone ?? row.phone ?? row["ContactNumber"] ?? row.contactNumber,
-					epic: row.EpicNumber ?? row.Epic ?? row.epic ?? row["EPIC Number"] ?? row.EPICNumber
-				});
+				const rawStateJsonCandidate = coerceString(
+					firstPopulatedValue(row.RawStateJson, row.rawStateJson, row.StateJson, row.stateJson)
+				);
+				let normalized = null;
+				if (rawStateJsonCandidate) {
+					try {
+						const parsedState = JSON.parse(rawStateJsonCandidate);
+						if (parsedState && typeof parsedState === "object") {
+							normalized = normalizeRowState(parsedState);
+						}
+					} catch {
+						// Ignore JSON parse errors and fall back to column-based parsing
+					}
+				}
+				if (!normalized) {
+					const fallback = {
+						distributed: firstPopulatedValue(row.Distributed, row.distributed),
+						takenBack: firstPopulatedValue(row.TakenBack, row.takenBack, row.Collected, row.collected),
+						missedForm: firstPopulatedValue(
+							row.MissedForm,
+							row.missedForm,
+							row.NotReturned,
+							row.notReturned,
+							row["Not Returned"],
+							row["NotReturned"],
+							row.Missed,
+							row.DidntReceiveBack,
+							row.didntReceiveBack
+						),
+						deleted: firstPopulatedValue(row.Deleted, row.deleted, row["IsDeleted"]),
+						missing: firstPopulatedValue(
+							row.FormMissing,
+							row.formMissing,
+							row.Missing,
+							row.missing,
+							row["Form Missing"]
+						),
+						haveForm: firstPopulatedValue(
+							row.HaveForm,
+							row.haveForm,
+							row.IHaveForm,
+							row["I Have"],
+							row["IHave"]
+						),
+						distributionType: firstPopulatedValue(
+							row.DistributionType,
+							row.distributionType,
+							row["Distribution Type"],
+							row["Distribution"]
+						),
+						showSecondStatus: firstPopulatedValue(row.ShowSecondStatus, row.showSecondStatus),
+						status1: firstPopulatedValue(row.Status1, row.status1),
+						status2: firstPopulatedValue(row.Status2, row.status2),
+						comments: firstPopulatedValue(row.Comments, row.comments),
+						showComments: firstPopulatedValue(row.ShowComments, row.showComments),
+						name: firstPopulatedValue(row.Name, row.name, row.FullName, row.fullName),
+						phone: firstPopulatedValue(
+							row.PhoneNumber,
+							row.phoneNumber,
+							row.Phone,
+							row.phone,
+							row.ContactNumber,
+							row.contactNumber,
+							row.Mobile,
+							row.mobile
+						),
+						epic: firstPopulatedValue(
+							row.EpicNumber,
+							row.epicNumber,
+							row.Epic,
+							row.epic,
+							row.EPICNumber,
+							row.epicNo,
+							row["EPIC Number"]
+						)
+					};
+					normalized = normalizeRowState(fallback);
+				}
 				stateMap.set(formNumber, normalized);
 			}
 
@@ -2757,20 +2933,29 @@
 				saveRowState(i, state);
 			}
 
-			const groupsSheet = workbook.Sheets.Societies || workbook.Sheets.Groups || null;
+			const groupsSheet =
+				workbook.Sheets.Societies || workbook.Sheets.Groups || workbook.Sheets.societies || null;
 			const importedGroups = [];
+			const usedGroupIds = new Set();
 			if (groupsSheet) {
 				const groupsRows = XLSX.utils.sheet_to_json(groupsSheet, { defval: "" });
 				let index = 0;
 				for (const row of groupsRows) {
-					const name = coerceString(row.Name ?? row.name).trim();
-					const start = Number.parseInt(row.Start ?? row.start, 10);
-					const end = Number.parseInt(row.End ?? row.end, 10);
+					const name = coerceString(firstPopulatedValue(row.Name, row.name)).trim();
+					const start = Number.parseInt(firstPopulatedValue(row.Start, row.start), 10);
+					const end = Number.parseInt(firstPopulatedValue(row.End, row.end), 10);
 					if (!name || !Number.isFinite(start) || !Number.isFinite(end)) continue;
 					if (start < 1 || end < 1 || start > MAX_FORMS || end > MAX_FORMS || start > end) continue;
 					index += 1;
+					const rawId = coerceString(firstPopulatedValue(row.Id, row.ID, row.id)).trim();
+					const fallbackPrefix = supportsRowStateJson ? "imported" : "legacy";
+					let groupId = rawId || `${fallbackPrefix}_${Date.now()}_${index}`;
+					while (usedGroupIds.has(groupId)) {
+						groupId = `${groupId}_${index}`;
+					}
+					usedGroupIds.add(groupId);
 					importedGroups.push({
-						id: `imported_${Date.now()}_${index}`,
+						id: groupId,
 						name,
 						start,
 						end
