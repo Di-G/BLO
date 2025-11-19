@@ -1,5 +1,6 @@
 (() => {
 	const MAX_FORMS = 10000;
+	const ASSET_VERSION = "11";
 	const STATUS_OPTIONS = [
 		"",
 		"Shifted",
@@ -3060,10 +3061,13 @@
 	}
 
 	if ("serviceWorker" in navigator) {
+		const swUrl = `sw.js?v=${ASSET_VERSION}`;
 		window.addEventListener("load", async () => {
-			navigator.serviceWorker.register("sw.js").catch((error) => {
+			try {
+				await navigator.serviceWorker.register(swUrl);
+			} catch (error) {
 				console.error("Service worker registration failed:", error);
-			});
+			}
 		});
 	}
 })();
