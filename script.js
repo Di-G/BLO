@@ -86,6 +86,9 @@
 		statsCollected: document.getElementById("statsCollected"),
 		statsHave: document.getElementById("statsHave"),
 		statsOnlineUploaded: document.getElementById("statsOnlineUploaded"),
+		statsOnlineUploadedCollected: document.getElementById("statsOnlineUploadedCollected"),
+		statsOnlineUploadedHave: document.getElementById("statsOnlineUploadedHave"),
+		statsOnlineUploadedOther: document.getElementById("statsOnlineUploadedOther"),
 		statsMissing: document.getElementById("statsMissing"),
 		statsDeleted: document.getElementById("statsDeleted"),
 		statsNoEntry: document.getElementById("statsNoEntry"),
@@ -976,14 +979,14 @@
 
 	function determineRowColorHex(state) {
 		if (!state || typeof state !== "object") return "#ffffff";
-		if (state.deleted) return "#e2e8f0"; // muted gray for deleted
-		if (state.missing) return "#fef3c7"; // pale amber for missing
-		if (state.onlineUploaded) return "#bbf7d0"; // mint green for online uploaded
-		if (state.missedForm) return "#fecaca"; // deeper red for not returned
-		if (state.haveForm) return "#f5d0fe"; // brighter purple
-		if (state.distributed && state.takenBack) return "#dcfce7"; // light green
-		if (state.distributed) return "#bae6fd"; // brighter blue
-		if (state.takenBack) return "#fef9c3"; // light yellow
+	if (state.deleted) return "#e2e8f0"; // muted gray for deleted
+	if (state.missing) return "#fef3c7"; // pale amber for missing
+	if (state.onlineUploaded) return "#86efac"; // richer green for online uploaded
+	if (state.missedForm) return "#fecaca"; // deeper red for not returned
+	if (state.haveForm) return "#f5d0fe"; // brighter purple
+	if (state.distributed && state.takenBack) return "#dcfce7"; // light green
+	if (state.distributed) return "#bae6fd"; // brighter blue
+	if (state.takenBack) return "#fef9c3"; // light yellow
 		return "#ffffff";
 	}
 
@@ -1602,9 +1605,9 @@
 			badge.title = "Click to restore this form";
 			badge.addEventListener("click", () => {
 				if (saved.deleted) {
-					toggleIgnoredState("deleted");
+					void toggleIgnoredState("deleted");
 				} else if (saved.missing) {
-					toggleIgnoredState("missing");
+					void toggleIgnoredState("missing");
 				}
 			});
 			ignoredInfoCol.appendChild(badge);
@@ -1632,8 +1635,34 @@
 			applyOnlineUploadedVisuals();
 		};
 
-		const toggleIgnoredState = (mode) => {
+		const toggleIgnoredState = async (mode) => {
 			const activating = mode === "deleted" ? !saved.deleted : !saved.missing;
+			if (activating) {
+				const hasMeaningfulData =
+					Boolean(saved.distributed) ||
+					Boolean(saved.takenBack) ||
+					Boolean(saved.haveForm) ||
+					Boolean(saved.missedForm) ||
+					Boolean(saved.onlineUploaded) ||
+					Boolean(saved.status1 && saved.status1.trim()) ||
+					Boolean(saved.status2 && saved.status2.trim()) ||
+					Boolean(saved.comments && saved.comments.trim()) ||
+					Boolean(saved.name && saved.name.trim()) ||
+					Boolean(saved.phone && saved.phone.trim()) ||
+					Boolean(saved.epic && saved.epic.trim()) ||
+					Boolean(saved.showSecondStatus) ||
+					Boolean(saved.showComments);
+				if (hasMeaningfulData) {
+					const targetLabel = mode === "deleted" ? "Deleted" : "Form Missing";
+					const proceed = await showConfirm(
+						`All saved data for form ${id} will be removed and it will be marked as ${targetLabel}. Continue?`,
+						true
+					);
+					if (!proceed) {
+						return;
+					}
+				}
+			}
 			if (mode === "deleted") {
 				saved.deleted = activating;
 				if (activating) saved.missing = false;
@@ -1692,8 +1721,12 @@
 			scheduleGroupStatsUpdate(id);
 		});
 
-		btnDeleted.addEventListener("click", () => toggleIgnoredState("deleted"));
-		btnMissing.addEventListener("click", () => toggleIgnoredState("missing"));
+		btnDeleted.addEventListener("click", () => {
+			void toggleIgnoredState("deleted");
+		});
+		btnMissing.addEventListener("click", () => {
+			void toggleIgnoredState("missing");
+		});
 
 		// Handlers
 		btnDist.addEventListener("click", async () => {
@@ -2175,37 +2208,70 @@
 		appendIfPresent("Name", row.name);
 		appendIfPresent("Phone #", row.phone);
 		appendIfPresent("EPIC #", row.epic);
-
-		if (row.onlineUploaded) {
-			summary.title = "Online uploaded";
+		const pushComment = () => {
 			if (hasComments) summary.details.push(trimmedComment);
-		} else if (row.deleted) {
-			summary.title = "Deleted";
-			if (hasComments) summary.details.push(trimmedComment);
-		} else if (row.missing) {
-			summary.title = "Form missing";
-			if (hasComments) summary.details.push(trimmedComment);
-		} else if (row.haveForm) {
-			summary.title = "I have form";
-			const statuses = [row.status1, row.status2].map((s) => (typeof s === "string" ? s.trim() : "")).filter(Boolean);
+		};
+		const pushDistributionNote = () => {
+			if (row.distributionType === "given") summary.details.push("Given to");
+		};
+		const pushStatuses = () => {
+			const statuses = [row.status1, row.status2]
+				.map((s) => (typeof s === "string" ? s.trim() : ""))
+				.filter(Boolean);
 			if (statuses.length) summary.details.push(statuses.join(", "));
+		};
+		const applySummary = (allowOnlineUploaded) => {
+			if (allowOnlineUploaded && row.onlineUploaded) {
+				summary.title = "Online uploaded";
+				pushComment();
+				return true;
+			}
+			if (row.deleted) {
+				summary.title = "Deleted";
+				pushComment();
+				return true;
+			}
+			if (row.missing) {
+				summary.title = "Form missing";
+				pushComment();
+				return true;
+			}
+			if (row.haveForm) {
+				summary.title = "I have form";
+				pushStatuses();
+				pushComment();
+				return true;
+			}
+			if (row.missedForm) {
+				summary.title = "Not returned";
+				pushComment();
+				return true;
+			}
+			if (row.distributed && row.takenBack) {
+				summary.title = "Collected";
+				pushDistributionNote();
+				pushComment();
+				return true;
+			}
+			if (row.distributed) {
+				summary.title = "Distributed";
+				pushDistributionNote();
+				pushComment();
+				return true;
+			}
+			if (row.takenBack) {
+				summary.title = "Collected form";
+				pushComment();
+				return true;
+			}
+			return false;
+		};
+		const matched = applySummary(!row.onlineUploaded);
+		if (!matched) {
+			if (row.onlineUploaded) {
+				summary.title = "Completed";
+			}
 			if (hasComments) summary.details.push(trimmedComment);
-		} else if (row.missedForm) {
-			summary.title = "Not returned";
-			if (hasComments) summary.details.push(trimmedComment);
-		} else if (row.distributed && row.takenBack) {
-			summary.title = "Collected";
-			if (row.distributionType === "given") summary.details.push("Given to");
-			if (hasComments) summary.details.push(trimmedComment);
-		} else if (row.distributed) {
-			summary.title = "Distributed";
-			if (row.distributionType === "given") summary.details.push("Given to");
-			if (hasComments) summary.details.push(trimmedComment);
-		} else if (row.takenBack) {
-			summary.title = "Collected form";
-			if (hasComments) summary.details.push(trimmedComment);
-		} else if (hasComments) {
-			summary.details.push(trimmedComment);
 		}
 
 		if (personalDetails.length) {
@@ -2295,6 +2361,9 @@
 			collected: 0,
 			have: 0,
 			uploaded: 0,
+			uploadedCollected: 0,
+			uploadedHave: 0,
+			uploadedOther: 0,
 			missing: 0,
 			deleted: 0,
 			noEntry: 0
@@ -2313,6 +2382,13 @@
 			const isUploaded = Boolean(state.onlineUploaded);
 			if (isUploaded) {
 				stats.uploaded += 1;
+				if (state.takenBack) {
+					stats.uploadedCollected += 1;
+				} else if (state.haveForm) {
+					stats.uploadedHave += 1;
+				} else {
+					stats.uploadedOther += 1;
+				}
 				continue;
 			}
 			if (state.distributed) stats.distributed += 1;
@@ -2339,6 +2415,15 @@
 		}
 		if (els.statsOnlineUploaded) {
 			els.statsOnlineUploaded.textContent = String(stats.uploaded);
+		}
+		if (els.statsOnlineUploadedCollected) {
+			els.statsOnlineUploadedCollected.textContent = String(stats.uploadedCollected);
+		}
+		if (els.statsOnlineUploadedHave) {
+			els.statsOnlineUploadedHave.textContent = String(stats.uploadedHave);
+		}
+		if (els.statsOnlineUploadedOther) {
+			els.statsOnlineUploadedOther.textContent = String(stats.uploadedOther);
 		}
 		if (els.statsMissing) {
 			els.statsMissing.textContent = String(stats.missing);
@@ -2782,7 +2867,15 @@
 				didParseCell: (data) => {
 					if (data.section !== "body") return;
 					const rowData = data.row && data.row.raw && data.row.raw.rowData;
-					if (!rowData || !rowData.colorHex) return;
+					if (!rowData) return;
+					if (data.column.index === 0) {
+						const formNumberText = rowData.formNumber == null ? "" : String(rowData.formNumber);
+						data.cell.styles.halign = "center";
+						data.cell.styles.textColor = [0, 0, 0];
+						data.cell.styles.fontStyle = "normal";
+						data.cell.text = [formNumberText];
+					}
+					if (!rowData.colorHex) return;
 					const rgb = hexToRgb(rowData.colorHex);
 					if (!rgb) return;
 					data.cell.styles.fillColor = rgb;
@@ -2798,6 +2891,55 @@
 						data.cell.styles.textColor = [31, 41, 55];
 						data.cell.styles.cellPadding = { top: 6, right: 10, bottom: 6, left: 10 };
 						data.cell.text = data.row.raw[2];
+					}
+				},
+				didDrawCell: (data) => {
+					if (data.section !== "body") return;
+					const rowData = data.row && data.row.raw && data.row.raw.rowData;
+					if (!rowData || !rowData.onlineUploaded) return;
+					if (data.column.index !== 0) return;
+					const cell = data.cell;
+					const paddingRight =
+						typeof cell.padding === "function"
+							? cell.padding("right")
+							: cell.styles && typeof cell.styles.cellPadding === "object"
+							? cell.styles.cellPadding.right ?? 6
+							: 6;
+					const paddingLeft =
+						typeof cell.padding === "function"
+							? cell.padding("left")
+							: cell.styles && typeof cell.styles.cellPadding === "object"
+							? cell.styles.cellPadding.left ?? 6
+							: 6;
+					const availableWidth = cell.width - paddingLeft - paddingRight;
+					const tickSize = Math.min(10, Math.max(6, cell.height - 6));
+					const baseX = cell.x + paddingLeft + availableWidth;
+					const baseY = cell.y + cell.height / 2;
+					const startX = baseX - tickSize * 0.9;
+					const startY = baseY + tickSize * 0.05;
+					const midX = baseX - tickSize * 0.45;
+					const midY = baseY + tickSize * 0.45;
+					const endX = baseX;
+					const endY = baseY - tickSize * 0.6;
+					const previousLineWidth =
+						typeof doc.getLineWidth === "function" ? doc.getLineWidth() : doc.internal.getLineWidth();
+					const previousDrawColor =
+						typeof doc.getDrawColor === "function" ? doc.getDrawColor() : null;
+					doc.setDrawColor(18, 83, 36);
+					doc.setLineWidth(1.6);
+					doc.line(startX, startY, midX, midY);
+					doc.line(midX, midY, endX, endY);
+					if (typeof doc.setLineWidth === "function") {
+						doc.setLineWidth(previousLineWidth || 0.2);
+					}
+					if (previousDrawColor && typeof doc.setDrawColor === "function") {
+						if (Array.isArray(previousDrawColor)) {
+							doc.setDrawColor(...previousDrawColor);
+						} else {
+							doc.setDrawColor(previousDrawColor);
+						}
+					} else {
+						doc.setDrawColor(0, 0, 0);
 					}
 				}
 			});

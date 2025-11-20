@@ -25,6 +25,23 @@
 				<span class="analysis-summary__indicator" aria-hidden="true"></span>
 			</summary>
 			<div id="formStats" class="form-stats" aria-live="polite">
+				<div class="form-stats__section form-stats__section--uploaded">
+					<div class="form-stats__section-heading">
+						<span class="form-stats__section-title">Online Uploaded</span>
+						<span class="form-stats__section-total" id="statsOnlineUploaded">0</span>
+					</div>
+					<div class="form-stats__section-breakdown">
+						<div class="form-stats__split-item">
+							<span class="form-stats__sublabel">Collected</span>
+							<span class="form-stats__subvalue" id="statsOnlineUploadedCollected">0</span>
+						</div>
+						<div class="form-stats__split-item">
+							<span class="form-stats__sublabel">I Have</span>
+							<span class="form-stats__subvalue" id="statsOnlineUploadedHave">0</span>
+						</div>
+					</div>
+				</div>
+				<div class="form-stats__divider" aria-hidden="true"></div>
 				<div class="form-stats__item">
 					<span class="form-stats__label">Distributed</span>
 					<span class="form-stats__value" id="statsDistributed">0</span>
@@ -36,10 +53,6 @@
 				<div class="form-stats__item">
 					<span class="form-stats__label">I Have</span>
 					<span class="form-stats__value" id="statsHave">0</span>
-				</div>
-				<div class="form-stats__item">
-					<span class="form-stats__label">Online Uploaded</span>
-					<span class="form-stats__value" id="statsOnlineUploaded">0</span>
 				</div>
 				<div class="form-stats__item">
 					<span class="form-stats__label">Form Missing</span>
