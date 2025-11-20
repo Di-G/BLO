@@ -737,7 +737,61 @@ button:focus, input:focus, select:focus, textarea:focus {
 	z-index: 5;
 }
 .hidden { display: none; }
-.col-num { color: var(--muted); }
+.col-num {
+	color: var(--muted);
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	gap: 8px;
+}
+.col-num__value {
+	font-size: 16px;
+	font-weight: 700;
+	color: var(--text);
+}
+.online-upload-icon {
+	display: none;
+	font-size: 16px;
+	line-height: 1;
+}
+.online-upload-icon--visible {
+	display: inline-flex;
+}
+.online-upload-toggle {
+	width: 32px;
+	height: 28px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	background: var(--surface-2);
+	color: var(--muted);
+	border: 1px solid var(--border);
+	border-radius: 6px;
+	font-size: 16px;
+	line-height: 1;
+	transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+.online-upload-toggle:hover:not(:disabled) {
+	filter: brightness(1.05);
+}
+.online-upload-toggle--active {
+	background: #22c55e;
+	color: #052e16;
+	border-color: #16a34a;
+	box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.25);
+}
+.online-upload-toggle:disabled {
+	opacity: 0.4;
+	cursor: not-allowed;
+}
+.online-upload-label {
+	display: none;
+	font-size: 11px;
+	font-weight: 700;
+	letter-spacing: 0.05em;
+	text-transform: uppercase;
+	color: #22c55e;
+}
 
 .list {
 	display: flex;
@@ -821,13 +875,27 @@ button:focus, input:focus, select:focus, textarea:focus {
 	background: var(--muted);
 }
 .society-summary-dot--distributed {
-	background: var(--accent-2);
+	background: #bae6fd;
 }
 .society-summary-dot--have {
-	background: #a78bfa;
+	background: #f5d0fe;
 }
 .society-summary-dot--collected {
-	background: var(--accent);
+	background: #dcfce7;
+}
+.society-summary-dot--uploaded {
+	background: #bbf7d0;
+	animation: society-uploaded-pulse 1.8s ease-in-out infinite;
+	box-shadow: 0 0 0 0 rgba(248, 113, 113, 0.65);
+}
+
+@keyframes society-uploaded-pulse {
+	0% {
+		box-shadow: 0 0 0 0 rgba(248, 113, 113, 0.65);
+	}
+	100% {
+		box-shadow: 0 0 0 8px rgba(248, 113, 113, 0);
+	}
 }
 .society-body {
 	padding: 10px 14px 12px;
@@ -841,6 +909,23 @@ button:focus, input:focus, select:focus, textarea:focus {
 	background: var(--surface);
 	border: 1px solid var(--border);
 	border-radius: 8px;
+}
+
+.row-online-uploaded,
+.state-online-uploaded {
+	background: #bbf7d0;
+	border-color: #22c55e;
+}
+
+.row-online-uploaded .col-num__value,
+.state-online-uploaded .col-num__value {
+	color: #166534;
+}
+
+.row-online-uploaded .online-upload-label,
+.state-online-uploaded .online-upload-label {
+	display: inline-flex;
+	color: #166534;
 }
 
 /* Row state highlights */

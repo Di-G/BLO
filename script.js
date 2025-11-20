@@ -1,11 +1,12 @@
 (() => {
 	const MAX_FORMS = 10000;
-	const ASSET_VERSION = "11";
-	const DATA_EXPORT_VERSION = 2;
+	const ASSET_VERSION = "12";
+	const DATA_EXPORT_VERSION = 3;
 	const ROW_STATE_EXPORT_KEYS = [
 		"distributed",
 		"takenBack",
 		"haveForm",
+		"onlineUploaded",
 		"missedForm",
 		"distributionType",
 		"showSecondStatus",
@@ -33,6 +34,7 @@
 		"Collected",
 		"TakenBack",
 		"HaveForm",
+		"OnlineUploaded",
 		"MissedForm",
 		"NotReturned",
 		"Deleted",
@@ -83,6 +85,7 @@
 		statsDistributed: document.getElementById("statsDistributed"),
 		statsCollected: document.getElementById("statsCollected"),
 		statsHave: document.getElementById("statsHave"),
+		statsOnlineUploaded: document.getElementById("statsOnlineUploaded"),
 		statsMissing: document.getElementById("statsMissing"),
 		statsDeleted: document.getElementById("statsDeleted"),
 		statsNoEntry: document.getElementById("statsNoEntry"),
@@ -859,6 +862,7 @@
 			takenBack: false,
 			haveForm: false,
 			missedForm: false,
+			onlineUploaded: false,
 			distributionType: "self",
 			showSecondStatus: false,
 			status1: "",
@@ -882,6 +886,13 @@
 				raw.didNotReceiveBack ??
 				raw.notReturned ??
 				raw.notReturnedForm
+		);
+		state.onlineUploaded = coerceBoolean(
+			raw.onlineUploaded ??
+				raw.uploadedOnline ??
+				raw.onlineUpload ??
+				raw.onlineUploadedFlag ??
+				raw.formUploadedOnline
 		);
 		const normalizedDistributionType = coerceString(raw.distributionType)
 			.trim()
@@ -916,6 +927,7 @@
 			state.takenBack = false;
 			state.haveForm = false;
 			state.missedForm = false;
+			state.onlineUploaded = false;
 			state.showSecondStatus = false;
 			state.status1 = "";
 			state.status2 = "";
@@ -966,6 +978,7 @@
 		if (!state || typeof state !== "object") return "#ffffff";
 		if (state.deleted) return "#e2e8f0"; // muted gray for deleted
 		if (state.missing) return "#fef3c7"; // pale amber for missing
+		if (state.onlineUploaded) return "#bbf7d0"; // mint green for online uploaded
 		if (state.missedForm) return "#fecaca"; // deeper red for not returned
 		if (state.haveForm) return "#f5d0fe"; // brighter purple
 		if (state.distributed && state.takenBack) return "#dcfce7"; // light green
@@ -1135,12 +1148,17 @@
 				"state-missed",
 				"state-ignored",
 				"state-deleted",
-				"state-missing"
+				"state-missing",
+				"state-online-uploaded"
 			);
 			if (saved.deleted || saved.missing) {
 				row.classList.add("state-ignored");
 				if (saved.deleted) row.classList.add("state-deleted");
 				if (saved.missing) row.classList.add("state-missing");
+				return;
+			}
+			if (saved.onlineUploaded) {
+				row.classList.add("state-online-uploaded");
 				return;
 			}
 			if (saved.missedForm) {
@@ -1160,7 +1178,23 @@
 		// Number column
 		const numCol = document.createElement("div");
 		numCol.className = "col-num";
-		numCol.textContent = String(id);
+		const numValue = document.createElement("span");
+		numValue.className = "col-num__value";
+		numValue.textContent = String(id);
+		const onlineToggle = document.createElement("button");
+		onlineToggle.type = "button";
+		onlineToggle.className = "online-upload-toggle";
+		onlineToggle.setAttribute("aria-label", `Mark form ${id} as uploaded online`);
+		const onlineTick = document.createElement("span");
+		onlineTick.className = "online-upload-icon";
+		onlineTick.textContent = "✔";
+		onlineToggle.appendChild(onlineTick);
+		const onlineLabel = document.createElement("span");
+		onlineLabel.className = "online-upload-label";
+		onlineLabel.textContent = "uploaded online";
+		numCol.appendChild(numValue);
+		numCol.appendChild(onlineToggle);
+		numCol.appendChild(onlineLabel);
 
 		// Actions column
 		const actionsCol = document.createElement("div");
@@ -1513,6 +1547,48 @@
 		const ignoredInfoCol = document.createElement("div");
 		ignoredInfoCol.className = "col-ignored-info";
 
+		const applyOnlineUploadedVisuals = () => {
+			const active = Boolean(saved.onlineUploaded);
+			const controlsDisabled = Boolean(saved.deleted || saved.missing);
+			row.classList.toggle("row-online-uploaded", active);
+			onlineToggle.classList.toggle("online-upload-toggle--active", active);
+			onlineTick.classList.toggle("online-upload-icon--visible", active);
+			onlineToggle.disabled = controlsDisabled;
+			onlineToggle.setAttribute("aria-pressed", active ? "true" : "false");
+			onlineToggle.setAttribute(
+				"aria-label",
+				active ? `Unmark form ${id} as uploaded online` : `Mark form ${id} as uploaded online`
+			);
+			onlineToggle.setAttribute(
+				"title",
+				active
+					? "Marked as uploaded online. Click to undo."
+					: "Click to mark this form as uploaded online."
+			);
+			onlineLabel.style.display = active ? "" : "none";
+			const hideControls = controlsDisabled || active;
+			if (infoBar) {
+				infoBar.style.display = hideControls ? "none" : "";
+			}
+			actionsCol.style.display = hideControls ? "none" : "";
+			commentsCol.style.display = hideControls ? "none" : "";
+			if (hideControls) {
+				status1Col.style.display = "none";
+				status2Col.style.display = "none";
+				addSecondBtn.style.display = "none";
+				updateCommentVisibility(false, { persist: false });
+			} else {
+				status1Col.style.display = saved.haveForm ? "" : "none";
+				const showSecond = Boolean(saved.haveForm && saved.showSecondStatus);
+				status2Col.style.display = showSecond ? "" : "none";
+				addSecondBtn.style.display = saved.haveForm && !showSecond ? "" : "none";
+				const shouldShowComments =
+					Boolean(saved.comments && saved.comments.trim().length > 0) || Boolean(saved.showComments);
+				updateCommentVisibility(shouldShowComments, { persist: false });
+			}
+			recalcHeaderStatusVisibility();
+		};
+
 		const renderIgnoredBadge = () => {
 			ignoredInfoCol.textContent = "";
 			const label = saved.deleted ? "DELETED" : saved.missing ? "FORM MISSING" : "";
@@ -1546,29 +1622,14 @@
 			if (infoBar) {
 				infoBar.style.display = ignored ? "none" : "";
 			}
-			if (ignored) {
-				actionsCol.style.display = "none";
-				status1Col.style.display = "none";
-				status2Col.style.display = "none";
-				addSecondBtn.style.display = "none";
-				commentsCol.style.display = "none";
-				updateCommentVisibility(false, { persist: false });
-			} else {
-				actionsCol.style.display = "";
-				status1Col.style.display = saved.haveForm ? "" : "none";
-				const showSecond = Boolean(saved.haveForm && saved.showSecondStatus);
-				status2Col.style.display = showSecond ? "" : "none";
-				addSecondBtn.style.display = saved.haveForm && !showSecond ? "" : "none";
-				commentsCol.style.display = "";
-				const shouldShowComments =
-					Boolean(saved.comments && saved.comments.trim().length > 0) || Boolean(saved.showComments);
-				updateCommentVisibility(shouldShowComments, { persist: false });
+			if (!ignored) {
 				for (const controller of infoFieldControllers) {
 					if (controller && typeof controller.refresh === "function") {
 						controller.refresh();
 					}
 				}
 			}
+			applyOnlineUploadedVisuals();
 		};
 
 		const toggleIgnoredState = (mode) => {
@@ -1585,6 +1646,7 @@
 				saved.takenBack = false;
 				saved.haveForm = false;
 				saved.missedForm = false;
+				saved.onlineUploaded = false;
 				saved.showSecondStatus = false;
 				saved.status1 = "";
 				saved.status2 = "";
@@ -1607,6 +1669,28 @@
 			scheduleGroupStatsUpdate(id);
 			recalcHeaderStatusVisibility();
 		};
+
+		onlineToggle.addEventListener("click", async () => {
+			if (saved.deleted || saved.missing) return;
+			const next = !saved.onlineUploaded;
+			if (!next) {
+				const proceed = await showConfirm("You're marking this form as not uploaded online");
+				if (!proceed) return;
+			}
+			saved.onlineUploaded = next;
+			saveRowState(id, saved);
+			refreshRowVisuals();
+			applyOnlineUploadedVisuals();
+			if (!next) {
+				for (const controller of infoFieldControllers) {
+					if (controller && typeof controller.refresh === "function") {
+						controller.refresh();
+					}
+				}
+			}
+			scheduleFormStatsUpdate();
+			scheduleGroupStatsUpdate(id);
+		});
 
 		btnDeleted.addEventListener("click", () => toggleIgnoredState("deleted"));
 		btnMissing.addEventListener("click", () => toggleIgnoredState("missing"));
@@ -2092,7 +2176,10 @@
 		appendIfPresent("Phone #", row.phone);
 		appendIfPresent("EPIC #", row.epic);
 
-		if (row.deleted) {
+		if (row.onlineUploaded) {
+			summary.title = "Online uploaded";
+			if (hasComments) summary.details.push(trimmedComment);
+		} else if (row.deleted) {
 			summary.title = "Deleted";
 			if (hasComments) summary.details.push(trimmedComment);
 		} else if (row.missing) {
@@ -2107,7 +2194,7 @@
 			summary.title = "Not returned";
 			if (hasComments) summary.details.push(trimmedComment);
 		} else if (row.distributed && row.takenBack) {
-			summary.title = "Completed";
+			summary.title = "Collected";
 			if (row.distributionType === "given") summary.details.push("Given to");
 			if (hasComments) summary.details.push(trimmedComment);
 		} else if (row.distributed) {
@@ -2133,13 +2220,17 @@
 			distributed: 0,
 			takenBack: 0,
 			haveForm: 0,
-			missed: 0
+			missed: 0,
+			onlineUploaded: 0
 		};
 		if (!Array.isArray(rows)) {
 			return totals;
 		}
 		for (const row of rows) {
 			if (!row || typeof row !== "object") continue;
+			const isUploaded = Boolean(row.onlineUploaded);
+			if (isUploaded) totals.onlineUploaded += 1;
+			if (isUploaded) continue;
 			if (row.distributed) totals.distributed += 1;
 			if (row.takenBack) totals.takenBack += 1;
 			if (row.haveForm) totals.haveForm += 1;
@@ -2152,7 +2243,8 @@
 		const stats = {
 			distributed: 0,
 			have: 0,
-			collected: 0
+			collected: 0,
+			uploaded: 0
 		};
 		if (!Array.isArray(formNumbers)) {
 			return stats;
@@ -2162,6 +2254,11 @@
 			const state = getRowState(formNumber);
 			if (!state || typeof state !== "object") continue;
 			if (state.deleted || state.missing) continue;
+			const isUploaded = Boolean(state.onlineUploaded);
+			if (isUploaded) {
+				stats.uploaded += 1;
+				continue;
+			}
 			if (state.distributed) stats.distributed += 1;
 			if (state.haveForm) stats.have += 1;
 			if (state.takenBack) stats.collected += 1;
@@ -2175,7 +2272,8 @@
 			Boolean(state.distributed) ||
 			Boolean(state.takenBack) ||
 			Boolean(state.haveForm) ||
-			Boolean(state.missedForm);
+			Boolean(state.missedForm) ||
+			Boolean(state.onlineUploaded);
 		const hasDetails =
 			Boolean(state.status1 && state.status1.trim()) ||
 			Boolean(state.status2 && state.status2.trim()) ||
@@ -2196,6 +2294,7 @@
 			distributed: 0,
 			collected: 0,
 			have: 0,
+			uploaded: 0,
 			missing: 0,
 			deleted: 0,
 			noEntry: 0
@@ -2211,6 +2310,11 @@
 			if (isDeleted) stats.deleted += 1;
 			if (isMissing) stats.missing += 1;
 			if (isDeleted || isMissing) continue;
+			const isUploaded = Boolean(state.onlineUploaded);
+			if (isUploaded) {
+				stats.uploaded += 1;
+				continue;
+			}
 			if (state.distributed) stats.distributed += 1;
 			if (state.takenBack) stats.collected += 1;
 			if (state.haveForm) stats.have += 1;
@@ -2232,6 +2336,9 @@
 		}
 		if (els.statsHave) {
 			els.statsHave.textContent = String(stats.have);
+		}
+		if (els.statsOnlineUploaded) {
+			els.statsOnlineUploaded.textContent = String(stats.uploaded);
 		}
 		if (els.statsMissing) {
 			els.statsMissing.textContent = String(stats.missing);
@@ -2280,7 +2387,8 @@
 			const entries = [
 				["distributed", stats.distributed],
 				["have", stats.have],
-				["collected", stats.collected]
+				["collected", stats.collected],
+				["uploaded", stats.uploaded]
 			];
 			for (const [key, value] of entries) {
 				const statInfo = entry.statValues[key];
@@ -2334,8 +2442,9 @@
 	}
 
 	function formatRowStatsLine(stats) {
-		const totals = stats || { distributed: 0, takenBack: 0, haveForm: 0, missed: 0 };
-		return `Distributed: ${totals.distributed}  •  Not Returned: ${totals.missed}  •  Collected: ${totals.takenBack}  •  I Have: ${totals.haveForm}`;
+		const totals =
+			stats || { distributed: 0, takenBack: 0, haveForm: 0, missed: 0, onlineUploaded: 0 };
+		return `Distributed: ${totals.distributed}  •  Not Returned: ${totals.missed}  •  Collected: ${totals.takenBack}  •  I Have: ${totals.haveForm}  •  Online Uploaded: ${totals.onlineUploaded}`;
 	}
 
 	function renderList(n) {
@@ -2428,6 +2537,7 @@
 			createSummaryStat("distributed", initialStats.distributed, "Distributed forms");
 			createSummaryStat("have", initialStats.have, "I have forms");
 			createSummaryStat("collected", initialStats.collected, "Collected forms");
+			createSummaryStat("uploaded", initialStats.uploaded, "Online uploaded forms");
 			summary.appendChild(summaryMain);
 			summary.appendChild(statsWrap);
 			details.appendChild(summary);
@@ -2743,6 +2853,7 @@
 				formatBooleanForExcel(row.takenBack),
 				formatBooleanForExcel(row.takenBack),
 				formatBooleanForExcel(row.haveForm),
+				formatBooleanForExcel(row.onlineUploaded),
 				formatBooleanForExcel(row.missedForm),
 				formatBooleanForExcel(row.missedForm),
 				formatBooleanForExcel(row.deleted),
@@ -2888,6 +2999,12 @@
 							row.IHaveForm,
 							row["I Have"],
 							row["IHave"]
+						),
+						onlineUploaded: firstPopulatedValue(
+							row.OnlineUploaded,
+							row.onlineUploaded,
+							row["Online Uploaded"],
+							row.UploadedOnline
 						),
 						distributionType: firstPopulatedValue(
 							row.DistributionType,

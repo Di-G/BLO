@@ -1,4 +1,4 @@
-const ASSET_VERSION = "11";
+const ASSET_VERSION = "12";
 const CACHE_NAME = `blo-forms-tracker-v${ASSET_VERSION}`;
 const VERSION_QUERY = `?v=${ASSET_VERSION}`;
 const APP_SHELL = [
